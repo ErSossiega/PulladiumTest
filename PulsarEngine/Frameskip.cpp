@@ -349,7 +349,9 @@ static void ResetFrameskipState() {
 static SectionLoadHook ResetFrameskipHook(ResetFrameskipState);
 
 static void PatchedGameScreenEffectsMgrUpdate(GameScreenEffectsMgr* mgr) {
-    if (*(u32*)0x80001638 >= 15) {
+    const RacedataScenario& scenario = Racedata::sInstance->racesScenario;
+    const u32 localPlayerCount = scenario.localPlayerCount;
+    if (*(u32*)0x80001638 >= 8 || localPlayerCount > 1) {
         return;
     }
     mgr->Update();
