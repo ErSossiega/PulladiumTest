@@ -1,3 +1,14 @@
+·Updated to 2.1.1
+
+Creator Changes:
+-Changed erroneous NinjaWFC text to Wiilink WFC 
+
+Engine Changes:
+-Fixed outdated Wiilink WFC payload, and issues with online finish times
+-Fixed shock flicker bug (as a side effect, the shock's flash will be disabled when at or below 30fps)
+-Toadette Hack Fan: Fixed multiplayer settings button not appearing on NTSC-U
+-Toadette Hack Fan: Kiosk demo support
+
 ·Updated to 2.1
 
 Creator Changes:
