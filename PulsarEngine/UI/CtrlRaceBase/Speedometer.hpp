@@ -13,6 +13,7 @@ public:
     static u32 Count();
     static void Create(Page& page, u32 index, u32 count);
 private:
+    bool showMtCharge; //if true then we show the mt charge instead of the speed value
     struct SpeedArg {
         SpeedArg() {}
         SpeedArg(u32 hundreds, u32 tens, u32 units, u32 dot, u32 tenths, u32 hundredths, u32 thousandths) :

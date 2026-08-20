@@ -11,18 +11,34 @@ u32 CtrlRaceSpeedo::Count() {
     const SectionId sectionId = SectionMgr::sInstance->curSection->sectionId;
     if(sectionId >= SECTION_WATCH_GHOST_FROM_CHANNEL && sectionId <= SECTION_WATCH_GHOST_FROM_MENU) localPlayerCount += 1;
     if(localPlayerCount == 0 && (scenario.settings.gametype & GAMETYPE_ONLINE_SPECTATOR)) localPlayerCount = 1;
+    //with one player we return 2 count, so 2 speedometers
+        if(localPlayerCount == 1){
+
+    return localPlayerCount * 2;
+    }
     return localPlayerCount;
 }
 void CtrlRaceSpeedo::Create(Page& page, u32 index, u32 count) {
-    u8 speedoType = (count == 3) ? 4 : count;
+    //we need this to be able to get the local player count, so we can know which speedometer variant to load
+    const RacedataScenario& scenario = Racedata::sInstance->racesScenario;
+    u32 localPlayerCount = scenario.localPlayerCount;
+    u8 speedoType = (localPlayerCount == 3) ? 4 : localPlayerCount;
+
     for(int i = 0; i < count; ++i) {
         CtrlRaceSpeedo* som = new(CtrlRaceSpeedo);
+        som -> showMtCharge = i == 1 && localPlayerCount == 1; //if we only have one player then the second speedometer will show the mt charge instead of the speed value
         page.AddControl(index + i, *som, 0);
         char variant[0x20];
         int pos = i;
         if(count == 1 && Settings::Mgr::Get().GetSettingValue(Settings::SETTINGSTYPE_RACE, SETTINGRACE_RADIO_SOM) == RACESETTING_SOM_RIGHT) pos = 1;
         snprintf(variant, 0x20, "Speedo_%1d_%1d", speedoType, pos);
-        som->Load(variant, i);
+        //if we only have 1 player then we load the first speedometer variant, otherwise we load the variant based on the index
+        if(localPlayerCount == 1){
+            som->Load(variant, 0);
+        }else{
+            som->Load(variant, i);
+        }
+        
     }
 }
 static CustomCtrlBuilder SOM(CtrlRaceSpeedo::Count, CtrlRaceSpeedo::Create);
@@ -69,16 +85,14 @@ void CtrlRaceSpeedo::OnUpdate() {
     Vec3 sum;
     MTX::PSVECAdd(&physics->engineSpeed, &physics->speed2, &sum);
     MTX::PSVECAdd(&physics->speed3, &sum, &sum);
-    //float speed = MTX::PSVECMag(&sum);
+    
     float speed = MTX::PSVECMag(&sum);
-    float speed = MTX::PSVECMag(&sum);
-    //float speedCap = pointers.kartMovement->hardSpeedLimit;
-    //if(speed > speedCap) speed = speedCap;
+    float speedCap = pointers.kartMovement->hardSpeedLimit;
+    if(speed > speedCap) speed = speedCap;
 
-    //speed = speed * 2.0f; //TEST BLOCCO 1 - da togliere
-    speed = static_cast<s16>(pointers.kartMovement->mtCharge); 
+    float mt = static_cast<float>(pointers.kartMovement->mtCharge); 
 
-    const u32 speedValue = static_cast<u32>(speed * 1000.0f);
+    const u32 speedValue = (this->showMtCharge) ? static_cast<u32>(mt * 1000.0f) : static_cast<u32>(speed * 1000.0f); //if we are showing the mt charge then we show the mt charge value instead of the speed value
 
     //10 means empty, 11 dot
     u32 hundreds = speedValue % 1000000 / 100000;
