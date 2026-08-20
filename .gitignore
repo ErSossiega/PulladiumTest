@@ -57,3 +57,8 @@ BuildTesting.bat
 *.vsidx
 PulsarPackCreator/Executable/Pulsar Pack Creator.dll.config
 *.v2
+*.png
+*.szs
+*.txt
+*.xml
+*.pul

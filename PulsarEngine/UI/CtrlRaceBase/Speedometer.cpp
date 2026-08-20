@@ -69,10 +69,14 @@ void CtrlRaceSpeedo::OnUpdate() {
     Vec3 sum;
     MTX::PSVECAdd(&physics->engineSpeed, &physics->speed2, &sum);
     MTX::PSVECAdd(&physics->speed3, &sum, &sum);
+    //float speed = MTX::PSVECMag(&sum);
     float speed = MTX::PSVECMag(&sum);
-    float speedCap = pointers.kartMovement->hardSpeedLimit;
-    if(speed > speedCap) speed = speedCap;
+    float speed = MTX::PSVECMag(&sum);
+    //float speedCap = pointers.kartMovement->hardSpeedLimit;
+    //if(speed > speedCap) speed = speedCap;
 
+    //speed = speed * 2.0f; //TEST BLOCCO 1 - da togliere
+    speed = static_cast<s16>(pointers.kartMovement->mtCharge); 
 
     const u32 speedValue = static_cast<u32>(speed * 1000.0f);
 

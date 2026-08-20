@@ -20,7 +20,7 @@ SET "PULSAR=.\PulsarEngine"
 SET CC="C:\Program Files (x86)\Freescale\CW for MPC55xx and MPC56xx 2.10\PowerPC_EABI_Tools\Command_Line_Tools\mwcceppc.exe"
 
 :: Riivolution Destination (change as necessary)
-SET "RIIVO="
+SET "RIIVO=C:\Users\brutt\Desktop\Dolphin-x64\User\Load\Riivolution\test\test"
 
 :: Compiler flags and folder
 SET CFLAGS=-I- -i %ENGINE% -i %GAMESOURCE% -i %PULSAR% ^
@@ -56,4 +56,5 @@ if %ErrorLevel% equ 0 if NOT "!RIIVO!" == "" (
 )
 
 :end
+pause
 ENDLOCAL
