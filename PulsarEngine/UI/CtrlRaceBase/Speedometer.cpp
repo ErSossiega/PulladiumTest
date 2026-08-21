@@ -56,8 +56,10 @@ void CtrlRaceSpeedo::Load(const char* variant, u8 id) {
         "Thousandths", "Thousandths", nullptr,
         nullptr
     };
-
-    loader.Load(UI::raceFolder, "PULSpeedo", variant, anims);
+    const char* ctrName = this->showMtCharge ? "PULMtCharge" : "PULSpeedo";
+    const char* varName = this->showMtCharge ? "MtCharge_0" : "variants";
+    loader.Load(UI::raceFolder, ctrName, varName, anims);
+    //loader.Load(UI::raceFolder, "PULSpeedo", variant, anims);
 
     this->Animate();
     return;
@@ -85,7 +87,7 @@ void CtrlRaceSpeedo::OnUpdate() {
     Vec3 sum;
     MTX::PSVECAdd(&physics->engineSpeed, &physics->speed2, &sum);
     MTX::PSVECAdd(&physics->speed3, &sum, &sum);
-    
+
     float speed = MTX::PSVECMag(&sum);
     float speedCap = pointers.kartMovement->hardSpeedLimit;
     if(speed > speedCap) speed = speedCap;
