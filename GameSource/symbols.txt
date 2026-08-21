@@ -1630,6 +1630,7 @@ sInstance__Q25RKNet12EVENTHandler = 0x809c20f0
 GetStoredItem__Q25RKNet11ITEMHandlerCFUc = 0x8065d21c
 ImportNewPackets__Q25RKNet11ITEMHandlerFv = 0x8065dd3c
 sInstance__Q25RKNet11ITEMHandler = 0x809c20f8
+UseItem__Q24Item9PlayerObjFb = 0x80791910
 
 #SELECT
 DestroyInstance__Q25RKNet13SELECTHandlerFv = 0x8065ff60
