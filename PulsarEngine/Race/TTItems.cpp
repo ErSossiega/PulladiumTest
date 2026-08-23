@@ -15,6 +15,7 @@ void restartItem(){
     isGivenItem = false;
     OS::Report("[TEST LOG DIO CANE]PulsarEngine: removing item from player 1 for TT\n", 0);
 }
+/*    
 void itemOnTT(){
     bool isTT = DriverMgr::isTT;
     if(isTT==true && isGivenItem == false){
@@ -36,6 +37,27 @@ void itemOnTT(){
     }
 }
 RaceLoadHook megaRestart(restartItem);
-RaceFrameHook mega(itemOnTT);
+RaceFrameHook mega(itemOnTT);*/
+void itemOnTT(){
+    bool isTT = DriverMgr::isTT;
+    if(isTT==true && isGivenItem == false){
+        switch(Settings::Mgr::Get().GetSettingValue(Settings::SETTINGSTYPE_TT, SETTINGTT_RADIO_ITEM)){
+            case TTSETTING_ITEM_DISABLED:
+                Item::Manager::sInstance->players[0].inventory.SetItem(TRIPLE_MUSHROOM, true);
+                isGivenItem = true;
+            break;
+            case TTSETTING_ITEM_STAR:
+                Item::Manager::sInstance->players[0].inventory.SetItem(STAR, true);
+                isGivenItem = true;
+            break;
+            case TTSETTING_ITEM_MEGA:
+                Item::Manager::sInstance->players[0].inventory.SetItem(MEGA_MUSHROOM, true);
+                isGivenItem = true;
+            break;
+        }
+    }
+}
+RaceLoadHook Restart(restartItem);
+RaceFrameHook item(itemOnTT);
 }
 }
