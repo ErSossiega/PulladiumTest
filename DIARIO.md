@@ -1,6 +1,7 @@
 # Diario — imparare il C++ su Pulladium
 
-**20–21 agosto 2026.** Due giorni, dal "so cosa sono i puntatori" a "ho scritto i miei hook".
+**20–23 agosto 2026.** Tre giorni, dal "so cosa sono i puntatori" a una feature configurabile dal
+menu.
 
 Questo file esiste perché gli errori valgono più del codice che funziona. Il codice giusto lo
 rileggi e dici "ok". Un errore che hai già fatto lo riconosci al volo la seconda volta.
@@ -476,23 +477,182 @@ Gli hook **non** passano da `symbols.txt`: a loro dai il numero e basta.
 
 ---
 
-## Cosa resta aperto
+## Giorno 3 — rendere una feature configurabile
 
-- Due gare di fila, per verificare che `RaceLoadHook` azzeri davvero anche col *riprova*
-- Il `\n` nei log, e messaggi diversi in punti diversi
-- L'impostazione destra/sinistra del tachimetro: ancora una riga morta
-- Il kit per il telefono: VPS per compilare, Dolphin Android per provare, listato disassemblato
-  per gli indirizzi, `OS::Report` al posto del debugger
-- Un `kmCall` chirurgico in un punto trovato da me, invece che preso da un header
+### Cosa è stato costruito
+
+L'oggetto in Time Trial diventa **un'impostazione**: tripli funghi, stella o mega, scelti dal menu
+di Pulsar. Prima feature che non è un valore fisso nel codice, ma qualcosa che decide chi gioca.
+
+File: `PulsarEngine/Race/TTItems.cpp` più i valori aggiunti in `Settings/SettingsParam.hpp`
+(`SETTINGTT_RADIO_ITEM`, `TTSETTING_ITEM_STAR`, …).
+
+### L'errore di fondo: dove va la condizione
+
+Il primo tentativo erano tre funzioni — `setStar`, `setMega`, `set3Shrooms` — ognuna che leggeva
+l'impostazione e, se corrispondeva, registrava i suoi hook:
+
+```cpp
+static void setStar(){
+    const bool isEnabled = ...GetSettingValue(...) == TTSETTING_ITEM_STAR;
+    if(isEnabled){
+        RaceLoadHook restartStar(restartStar);   // ← variabile LOCALE
+        RaceFrameHook star(setStarOnTT);         // ← variabile LOCALE
+    }
+}
+```
+
+Tre cose sbagliate insieme:
+
+1. **`setStar`, `setMega` e `set3Shrooms` non le chiamava nessuno.** Tre funzioni morte.
+2. Un hook **è un oggetto il cui costruttore lo aggiunge a una lista**. Dichiarato dentro una
+   funzione, nasce a ogni chiamata e **muore quando la funzione finisce**, lasciando nella lista un
+   puntatore a memoria che non esiste più.
+3. E soprattutto: gli hook si registrano **all'accensione, una volta sola**, prima che qualsiasi
+   impostazione abbia senso. E il giocatore può cambiarla **mentre gioca**.
+
+> **Non puoi rendere condizionale la registrazione. Devi rendere condizionale il comportamento.**
+
+La correzione ha fuso tre funzioni e tre flag in **una funzione e un flag**, con l'impostazione
+letta dentro, e i due hook a livello globale dove devono stare. Effetto collaterale gradito: se
+cambi impostazione fra una gara e l'altra funziona subito, perché il valore lo rileggi ogni frame.
+
+### Gli altri errori del giorno 3
+
+**L'ordine di dichiarazione, di nuovo.**
+
+```
+Error: undefined identifier 'restartMega'   (riga 86)
+Error: undefined identifier 'setMegaOnTT'   (riga 87)
+```
+
+`setMega()` chiamava due funzioni definite **sotto** di lei. È letteralmente quello che avevo
+scritto io mesi fa in `funzioni.cpp`: *"se va messo al di sotto di dove viene chiamata andrà in
+errore perché il compilatore è scemo e non sa dove trovarla"*.
+
+**La variabile che inizializza sé stessa.**
+
+```cpp
+RaceLoadHook restartStar(restartStar);
+// Warning: variable 'restartStar' is not initialized before being used
+```
+
+Ho dato **alla variabile lo stesso nome della funzione**. In C++ il nome che stai dichiarando è già
+in scope **dentro le sue stesse parentesi**: quel `restartStar` non è la funzione, è la variabile
+che sto creando in quel momento. Si inizializza con sé stessa.
+
+Il giorno prima funzionava solo perché avevo usato nomi diversi: `RaceLoadHook restart(restartStar);`.
+
+**Il build silenzioso — terza volta in tre giorni.** Il file non compilava, il vecchio `.o` restava
+linkato, e il gioco continuava a dare la stella. Il log diceva una cosa e il sorgente un'altra.
+
+**Un nome che mente.** L'opzione chiamata `TTSETTING_ITEM_DISABLED` dava tre funghi. Il codice
+faceva quello che gli avevo detto, ma il nome no.
+
+### Lo switch, e la forma "decidi poi agisci"
+
+La catena di `else if` leggeva l'impostazione **tre volte** e ripeteva `SetItem` + flag + log in
+ogni ramo. Con uno `switch` che sceglie **solo il valore**:
+
+```cpp
+const u32 scelta = ...GetSettingValue(...);
+ItemId item;
+switch(scelta){
+    case ...: item = TRIPLE_MUSHROOM; break;
+    case ...: item = STAR;            break;
+    case ...: item = MEGA_MUSHROOM;   break;
+    default:  return;                        // niente oggetto
+}
+...SetItem(item, true);
+isGivenItem = true;
+```
+
+È la stessa idea del `? :` in `Load()` del giorno 1: **decidi prima un valore, poi agisci una volta
+sola.** E il `default` risolve gratis il caso "nessun oggetto".
+
+Due cose sullo `switch` in C++: il **`break` non è opzionale** — senza, l'esecuzione prosegue nel
+caso successivo (*fallthrough*) e il compilatore non avvisa. E `default` copre tutto il resto.
+
+(Le variabili `static` in C++ nascono azzerate, garantito: `static bool isGivenItem;` è già `false`.)
 
 ---
 
-## Il conto dei due giorni
+## Cosa resta aperto
 
-Da `int prova = 5` a due hook che girano su Wii. In mezzo: `.` contro `->`, riferimenti, membri
-statici, il contratto fra due funzioni, scope e shadowing, `=` contro `==`, il ternario, `this`,
-conteggio contro indice, le tre `static`, comando contro domanda, `bl` contro `b`, i registri come
-firma, DSI contro ISI, `lis` + offset, i nomi mangled, e un debugger aperto per la prima volta.
+- Due gare di fila, per verificare che `RaceLoadHook` azzeri davvero anche col *riprova*
+- L'impostazione destra/sinistra del tachimetro: ancora una riga morta dal giorno 1
+- Il controllo del codice di uscita in `BuildPulsar.py`, così un errore di compilazione **ferma**
+  il build invece di consegnare un binario bugiardo
+- Il kit per il telefono: Winlator compila (il compilatore a 32 bit gira), il linker .NET no —
+  resta `Kamek` ARM64 nativo in Termux, oppure farsi linkare i `.o` da qualcuno
+- Il listato disassemblato di `StaticR.rel` come sostituto del debugger in viaggio
+
+---
+
+## Il prossimo argomento: il primo `kmCall` trovato da me
+
+Ho usato tutti e tre i tipi di hook, ma con una differenza che conta:
+
+| Hook | Da dove ho preso l'indirizzo |
+|---|---|
+| `kmBranch` | dal commento nell'header — regalato |
+| `kmWrite16` | dal `lis` + offset nel debugger — ricavato |
+| `kmCall` | **mai fatto da zero** |
+
+`kmCall` vuole l'indirizzo di una **`bl`**, cioè di una chiamata dentro il codice del gioco. Quello
+non è scritto da nessuna parte: negli header ci sono gli **inizi** delle funzioni, non i punti in
+cui vengono chiamate.
+
+### La tecnica
+
+1. Breakpoint sull'**inizio della funzione** (l'indirizzo sta nell'header)
+2. Quando scatta, leggi **`lr`**
+3. La `bl` che ti serve è a **`lr − 4`**
+
+Il perché è meccanico: quando la CPU esegue `bl` all'indirizzo A, mette in `lr` il valore **A + 4**
+— dove tornare — e salta. Quindi `lr` è l'istruzione *dopo* la chiamata.
+
+Verifica su un caso noto, `MegaTC.cpp`:
+
+```
+80580630   bl   0x80580778      ← kmCall(0x80580630, MegaTC)
+80580634   lwz  r0, 0x14(r1)    ← questo finisce in lr
+
+0x80580634 − 4 = 0x80580630     ✓
+```
+
+**Attenzione:** una funzione può essere chiamata da tanti punti. Il breakpoint dice da dove è
+arrivata *questa volta*. Se serve un punto preciso, va fatto scattare nel contesto giusto.
+
+### L'esercizio
+
+Scegliere una funzione, trovare **chi la chiama**, agganciare quel punto, e nel rimpiazzo
+richiamare l'originale nel ramo `else` — come fa `MegaTC`.
+
+È l'ultima cosa che separa *"modifico quello che c'è"* da *"intervengo dove voglio"*.
+
+### E poi
+
+- **Il blocco parametri a `0x808B5xxx`**: soglie e moltiplicatori della guida, si toccano con
+  `kmWrite`, e un errore si *vede* invece di crashare. Adatto a lavorare senza debugger.
+- **Rimappare i comandi**, anche su console: `Input::State::buttonActions` è già astratto dal
+  controller fisico, sono cinque bit da permutare. Un punto solo, si prova in time trial.
+  Attenzione a non rimappare anche `GhostController` e `AIController`.
+- **Nascondere le piste originali dall'online**: `CupsConfig::RandomizeTrack()` ha già il ramo
+  giusto scritto (`else` quando `hasRegs` è falso). Id `< 0x100` = originali, `>= 0x100` = custom.
+- **24 giocatori** — stella polare, non prossimo compito. 78 array `[12]` nei soli header, e il
+  vincolo vero è la memoria, non il codice. Primo gradino sensato: **provarci offline**, che isola
+  memoria e array dalla rete.
+
+---
+
+## Il conto dei tre giorni
+
+Da `int prova = 5` a una feature configurabile dal menu. In mezzo: `.` contro `->`, riferimenti,
+membri statici, il contratto fra due funzioni, scope e shadowing, `=` contro `==`, il ternario,
+`this`, conteggio contro indice, le tre `static`, comando contro domanda, `bl` contro `b`, i
+registri come firma della funzione, DSI contro ISI, `lis` + offset, i nomi mangled, `switch` e
+fallthrough, quando si registrano gli hook, e un debugger aperto per la prima volta.
 
 E soprattutto: **smettere di indovinare.** Gli ultimi problemi li ho risolti ragionando, e su
 qualcuno avevo già la risposta prima della conferma.
