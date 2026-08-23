@@ -10,7 +10,7 @@ namespace Settings {
 
 class Params {
 public:
-    static const int pulsarPageCount = 5;
+    static const int pulsarPageCount = 6; //menu, race, host, OTT, KO, TT
     static const int userPageCount = 0;
     static const int pageCount = pulsarPageCount + userPageCount;
 
@@ -32,6 +32,7 @@ enum Type {
     SETTINGSTYPE_HOST,
     SETTINGSTYPE_OTT,
     SETTINGSTYPE_KO,
+    SETTINGSTYPE_TT,
 };
 
 //If you want to add settings to your packs, they go in this enum, and GetUserSettingValue should be used to obtain the value of a given setting
@@ -43,6 +44,7 @@ enum UserType {
 
 //SETTINGS ENUM, for the page, DO NOT FORGET THE +6 for scrollers (see menu settings for example)
 //Use these 3 for "u32 setting" in GetSettingValue, the return will be the value of the other enums
+
 enum MenuSettings {
     SETTINGMENU_RADIO_FASTMENUS = 0,
     SETTINGMENU_RADIO_LAYOUT = 1,
@@ -81,6 +83,10 @@ enum KOSettings {
     SETTINGKO_FINAL = 1,
     SETTINGKO_KOPERRACE = 0 + 6,
     SETTINGKO_RACESPERKO = 1 + 6,
+};
+
+enum TTSettings {
+    SETTINGTT_RADIO_ITEM = 0,
 };
 
 //MENU SETTINGS
@@ -218,6 +224,11 @@ enum KOSettingRacesPerKO {
 };
 //KOSETTINGS
 
+enum TTSettingItem {
+    TTSETTING_ITEM_DISABLED,
+    TTSETTING_ITEM_STAR,
+    TTSETTING_ITEM_MEGA,
+};
 }//namespace Pulsar
 
 

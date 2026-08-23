@@ -5,32 +5,37 @@
 #include <MarioKartWii/Driver/DriverManager.hpp>
 #include <MarioKartWii/Item/ItemPlayer.hpp>
 #include <kamek.hpp>
+#include <Settings/Settings.hpp>
 
 
 namespace Pulsar {
 namespace Race {
-    static bool givenStar = false;
-
-    void restartStar(){
-        givenStar = false;
-    }
-
-    void setStarOnTT(){
-        static bool hasSetStar;
-            const u32 gamemode = Racedata::sInstance->racesScenario.settings.gamemode;
-            const bool isTT = DriverMgr::isTT;
-            if(isTT==true && givenStar == false){
-                Item::Manager::sInstance->players[0].inventory.SetItem(STAR, true);
-                givenStar = true;
+static bool isGivenItem;
+void restartItem(){
+    isGivenItem = false;
+    OS::Report("[TEST LOG DIO CANE]PulsarEngine: removing item from player 1 for TT\n", 0);
+}
+void itemOnTT(){
+    bool isTT = DriverMgr::isTT;
+    if(isTT==true && isGivenItem == false){
+        if(Settings::Mgr::Get().GetSettingValue(Settings::SETTINGSTYPE_TT, SETTINGTT_RADIO_ITEM) == TTSETTING_ITEM_DISABLED){
+            Item::Manager::sInstance->players[0].inventory.SetItem(TRIPLE_MUSHROOM, true);
+            isGivenItem = true;
+            OS::Report("[TEST LOG DIO CANE]PulsarEngine: Giving player 1 a Triple Mushroom for TT\n", 0);
         }
-        /*if(gamemode == MODE_TIME_TRIAL && givenStar == true){
-            OS::Report("[TEST LOG DIO CANE]PulsarEngine: Giving player 1 a star for TT", 0);
-            Item::Manager::sInstance->players[0].playerObj.UseItem(true);
-            Item::Manager::sInstance->players[0].inventory.RemoveItems(1);
-            givenStar = false;
-        }*/
+        else if(Settings::Mgr::Get().GetSettingValue(Settings::SETTINGSTYPE_TT, SETTINGTT_RADIO_ITEM) == TTSETTING_ITEM_STAR){
+            Item::Manager::sInstance->players[0].inventory.SetItem(STAR, true);
+            isGivenItem = true;
+            OS::Report("[TEST LOG DIO CANE]PulsarEngine: Giving player 1 a Star for TT\n", 0);
+        }
+        else if(Settings::Mgr::Get().GetSettingValue(Settings::SETTINGSTYPE_TT, SETTINGTT_RADIO_ITEM) == TTSETTING_ITEM_MEGA){
+            Item::Manager::sInstance->players[0].inventory.SetItem(MEGA_MUSHROOM, true);
+            isGivenItem = true;
+            OS::Report("[TEST LOG DIO CANE]PulsarEngine: Giving player 1 a Mega Mushroom for TT\n", 0);
+        }
     }
-RaceLoadHook restart(restartStar);
-RaceFrameHook star(setStarOnTT);
+}
+RaceLoadHook megaRestart(restartItem);
+RaceFrameHook mega(itemOnTT);
 }
 }
