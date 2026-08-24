@@ -57,6 +57,7 @@ void itemOnTT(){
             case TTSETTING_ITEM_GOLDEN:
                 Item::Manager::sInstance->players[0].inventory.SetItem(GOLDEN_MUSHROOM, true);
                 isGivenItem=true;
+            break;
         }
     }
 }
