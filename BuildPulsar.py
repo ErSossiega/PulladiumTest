@@ -61,11 +61,17 @@ def should_rebuild(cpp: str, modified_h: set[str]) -> bool:
 	# if none of the above, no need to rebuild
 	return False
 
-def compile_cpp(cpp: str):
+def compile_cpp(cpp: str) -> tuple[str, int]:
 	obj = os.path.join(BUILD, os.path.basename(cpp).replace(".cpp", ".o"))
 	cmd = f'"{COMPILER}" {FLAGS} {cpp} -o {obj}'
 	# log(f"Compiling {cpp}...")
-	subprocess.run(cmd, shell=True)
+	proc = subprocess.run(cmd, shell=True)
+
+	# a failed compile must not leave yesterday's .o behind: the linker would happily use it
+	if proc.returncode != 0 and os.path.exists(obj):
+		os.remove(obj)
+
+	return (cpp, proc.returncode)
 
 if __name__ == "__main__":
 	# add debug flags if -d argument is passed
@@ -100,9 +106,18 @@ if __name__ == "__main__":
 			quit()
 			
 	# build cpp files (in parallel!)
-	compile_cpp(f"{ENGINE}/kamek.cpp")
+	results = [compile_cpp(f"{ENGINE}/kamek.cpp")]
 	with concurrent.futures.ThreadPoolExecutor() as executor:
-		executor.map(compile_cpp, modified_cpps)
+		results.extend(executor.map(compile_cpp, modified_cpps))
+
+	# never link after a failed compile: the output would be stale code with a fresh timestamp
+	failed = list(dict.fromkeys(cpp for cpp, code in results if code != 0))
+	if failed:
+		log(f"BUILD FAILED: {len(failed)} file(s) did not compile. Nothing was linked or copied.")
+		for cpp in failed:
+			print(f"    {cpp}")
+		input("Press enter to close.")
+		sys.exit(1)
 
 	# link objects into binary
 	obj_files = glob.glob(f"{BUILD}/*.o")
