@@ -1,0 +1,34 @@
+#include <kamek.hpp>
+#include <MarioKartWii/Kart/KartMovement.hpp>
+#include <MarioKartWii/Driver/DriverManager.hpp>
+#include <MarioKartWii/Item/PlayerObj.hpp>
+#include <Settings/Settings.hpp>
+#include <hooks.hpp>
+#include <MarioKartWii/Item/ItemPlayer.hpp>
+#include <MarioKartWii/Item/ItemManager.hpp>
+
+
+namespace pulsar{
+    namespace race{
+        bool itemUsed;
+        void isUsed(){
+            itemUsed = false;
+        }
+        void MyMushroom(Kart::Movement& Movement){
+        bool isTT = DriverMgr::isTT;
+        if (Settings::Mgr::Get().GetSettingValue(Settings::SETTINGSTYPE_TT, SETTINGTT_RADIO_ITEM) == TTSETTING_ITEM_DISABLED){
+            
+            }else
+            {
+                itemUsed = true;
+                Movement.ActivateMushroom();
+            } 
+        }
+        kmCall(0x80798664, MyMushroom);  
+
+        RaceLoadHook Used(isUsed);
+    } 
+}
+
+
+
