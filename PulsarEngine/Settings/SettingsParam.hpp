@@ -228,6 +228,7 @@ enum TTSettingItem {
     TTSETTING_ITEM_DISABLED,
     TTSETTING_ITEM_STAR,
     TTSETTING_ITEM_MEGA,
+    TTSETTING_ITEM_GOLDEN,
 };
 }//namespace Pulsar
 
