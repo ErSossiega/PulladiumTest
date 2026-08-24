@@ -62,3 +62,7 @@ PulsarPackCreator/Executable/Pulsar Pack Creator.dll.config
 *.txt
 *.xml
 *.pul
+
+# Python
+__pycache__/
+*.pyc

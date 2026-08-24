@@ -1631,6 +1631,8 @@ GetStoredItem__Q25RKNet11ITEMHandlerCFUc = 0x8065d21c
 ImportNewPackets__Q25RKNet11ITEMHandlerFv = 0x8065dd3c
 sInstance__Q25RKNet11ITEMHandler = 0x809c20f8
 UseItem__Q24Item9PlayerObjFb = 0x80791910
+ActivateBullet__Q24Kart8MovementFUc = 0x805858ac
+ActivateMushroom__Q24Kart8MovementFv = 0x8057f3d8
 
 #SELECT
 DestroyInstance__Q25RKNet13SELECTHandlerFv = 0x8065ff60
