@@ -206,7 +206,9 @@ PowerPC can't load 32 bits in one instruction. **It always splits it in two.**
 
 **address = (the `lis` value << 16) + offset.** Arithmetic, not guesswork.
 
-The offset is **signed**: if it starts with 8–F it's negative and gets subtracted.
+The offset is **signed** — 16-bit two's complement. If the **raw** value starts with 8–F it's
+negative: subtract `0x10000` from it first. Dolphin usually does that step for you and prints it
+already signed, as `-0x4000`, so the leading-digit rule is really for when you're reading raw hex.
 
 | Range | Binary |
 |---|---|
