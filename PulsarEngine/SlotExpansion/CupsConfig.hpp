@@ -60,6 +60,26 @@ public:
         return id < 0x2000 && IsValidCup(static_cast<PulsarCupId>(id / 4));
     }
 
+    /*
+        How many tracks mainTracks actually holds. ToggleCTs zeroes ctsCupCount when the CTs
+        are switched off in the settings but leaves the array allocated, so the bound has to
+        come from definedCTsCupCount, which is the count the config was read with.
+    */
+    u32 GetLoadedTrackCount() const { return this->definedCTsCupCount * 4; }
+
+    /*
+        Whether this console owns the track behind id. Votes and winning tracks travel over
+        the network as raw ids, so a console running a pack with more tracks (or a different
+        Config.pul altogether) sends ids this pack has no Track for. Left unchecked they index
+        mainTracks out of bounds, and the garbage that comes back is used as variantCount (the
+        vote shows up with no name) and then as slot/musicSlot/crc32, which is what turns that
+        nameless vote into a crash for everyone once it wins.
+    */
+    bool IsTrackLoaded(PulsarId id) const {
+        if (IsReg(id)) return true;
+        return (static_cast<u32>(id) - PULSARID_FIRSTCT) < this->GetLoadedTrackCount();
+    }
+
     //Slot Expansion
     void SaveSelectedCourse(const PushButton& courseButton);
     PulsarCupId GetNextCupId(PulsarCupId cupId, s32 direction) const;
@@ -82,8 +102,12 @@ public:
     static const u8 idToCourseId[32];
 
     const Track& GetTrack(PulsarId id) const { //only for CTs
-        return this->mainTracks[id - PULSARID_FIRSTCT];
+        const u32 idx = static_cast<u32>(id) - PULSARID_FIRSTCT;
+        if (idx >= this->GetLoadedTrackCount()) return CupsConfig::invalidTrack; //never read past the array
+        return this->mainTracks[idx];
     }
+
+    static const Track invalidTrack; //returned for ids this pack does not have
 public:
 
 

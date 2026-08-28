@@ -118,6 +118,14 @@ void ExpSELECTHandler::DecideTrack(ExpSELECTHandler& self) {
                     aidVote = static_cast<PulsarId>(next);
                 }
             }
+            /*
+                A vote for a track this pack does not have must not be electable: every
+                console that lacks it would be sent to a track that is not there. It reaches
+                us whenever somebody in the room runs a different build of the pack, and it is
+                the vote that shows up on the vote screen with no name. Treat it as a random
+                vote, exactly like a player who never picked.
+            */
+            if (isCT && !cupsConfig->IsTrackLoaded(aidVote)) aidVote = cupsConfig->RandomizeTrack();
             votes[aid] = aidVote;
             if (isCT) {
                 bool isRepeatVote = false;
@@ -170,8 +178,14 @@ static void SetCorrectTrack(ArchiveMgr* root, PulsarId winningCourse) {
     if (hostAid == sub.localAid) select = &handler.toSendPacket;
     else select = &handler.receivedPackets[hostAid];
 
+    /*
+        The host is the one that elects the winner, so a host running a pack with more tracks
+        than ours hands us an id we have no track for. SetWinning swaps it for a track that
+        exists instead of letting the loader run on a slot read past the end of mainTracks;
+        load whatever it settled on so the two cannot disagree.
+    */
     cupsConfig->SetWinning(winningCourse, select->variantIdx);
-    root->RequestLoadCourseAsync(static_cast<CourseId>(winningCourse));
+    root->RequestLoadCourseAsync(static_cast<CourseId>(cupsConfig->GetWinning()));
 }
 kmCall(0x80644414, SetCorrectTrack);
 

@@ -11,6 +11,7 @@
 namespace Pulsar {
 
 CupsConfig* CupsConfig::sInstance = nullptr;
+const Track CupsConfig::invalidTrack = {0, 0, 0, 0};
 
 CupsConfig::CupsConfig(const CupsHolder& rawCups) : regsMode(rawCups.regsMode),
 //Cup actions initialization
@@ -99,6 +100,16 @@ u32 CupsConfig::RandomizeVariant(PulsarId id) const {
 }
 
 void CupsConfig::SetWinning(PulsarId id, u32 variantIdx) {
+    /*
+        Last line of defence for an id this pack does not have: everything below (and
+        GetCorrectTrackSlot/FormatTrackPath afterwards) would otherwise run on a Track read
+        past the end of mainTracks, i.e. on a random slot number and a szs that does not exist.
+    */
+    if (!IsReg(id) && !this->IsTrackLoaded(id) && this->GetLoadedTrackCount() != 0) {
+        id = PULSARID_FIRSTCT;
+        variantIdx = 0;
+    }
+
     if (!IsReg(id)) {
 
         const Track& track = GetTrack(id);

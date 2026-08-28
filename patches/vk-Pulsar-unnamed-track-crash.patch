@@ -1,0 +1,148 @@
+diff --git a/PulsarEngine/Network/PulSELECT.cpp b/PulsarEngine/Network/PulSELECT.cpp
+index 4cc041a..55201a1 100644
+--- a/PulsarEngine/Network/PulSELECT.cpp
++++ b/PulsarEngine/Network/PulSELECT.cpp
+@@ -202,6 +202,17 @@ void ExpSELECTHandler::DecideTrack(ExpSELECTHandler& self) {
+                     aidVote = static_cast<PulsarId>(next);
+                 }
+             }
++            /*
++                A vote for a track this pack does not have must not be electable: every
++                console that lacks it would be sent to a track that is not there. It reaches
++                us whenever somebody in the room runs a different build of the pack, and it is
++                the vote that shows up on the vote screen with no name. Treat it as a random
++                vote, exactly like a player who never picked.
++            */
++            if (isCT && !cupsConfig->IsTrackLoaded(aidVote)) {
++                aidVote = cupsConfig->RandomizeTrack();
++                votedRandom[aid] = true;
++            }
+             votes[aid] = aidVote;
+             if (isCT) {
+                 bool isRepeatVote = false;
+@@ -289,8 +300,14 @@ static void SetCorrectTrack(ArchiveMgr* root, PulsarId winningCourse) {
+         }
+     }
+ 
++    /*
++        The host is the one that elects the winner, so a host running a pack with more tracks
++        than ours hands us an id we have no track for. SetWinning swaps it for a track that
++        exists instead of letting the loader run on a slot read past the end of mainTracks;
++        load whatever it settled on so the two cannot disagree.
++    */
+     cupsConfig->SetWinning(winningCourse, select->variantIdx);
+-    root->RequestLoadCourseAsync(static_cast<CourseId>(winningCourse));
++    root->RequestLoadCourseAsync(static_cast<CourseId>(cupsConfig->GetWinning()));
+ }
+ kmCall(0x80644414, SetCorrectTrack);
+ 
+diff --git a/PulsarEngine/SlotExpansion/CupsConfig.cpp b/PulsarEngine/SlotExpansion/CupsConfig.cpp
+index b9d0515..ad6a34d 100644
+--- a/PulsarEngine/SlotExpansion/CupsConfig.cpp
++++ b/PulsarEngine/SlotExpansion/CupsConfig.cpp
+@@ -11,6 +11,7 @@
+ namespace Pulsar {
+ 
+ CupsConfig* CupsConfig::sInstance = nullptr;
++const Track CupsConfig::invalidTrack = {0, 0, 0, 0};
+ 
+ CupsConfig::CupsConfig(const CupsHolder& rawCups) : regsMode(rawCups.regsMode),
+ //Cup actions initialization
+@@ -114,6 +115,16 @@ void CupsConfig::SetWinning(PulsarId id, u32 variantIdx) {
+     if (variantIdx == 0xFF) variantIdx = 0;
+     if (IsReg(id)) variantIdx = 0;
+ 
++    /*
++        Last line of defence for an id this pack does not have: everything below (and
++        GetCorrectTrackSlot/FormatTrackPath afterwards) would otherwise run on a Track read
++        past the end of mainTracks, i.e. on a random slot number and a szs that does not exist.
++    */
++    if (!IsReg(id) && !this->IsTrackLoaded(id) && this->GetLoadedTrackCount() != 0) {
++        id = PULSARID_FIRSTCT;
++        variantIdx = 0;
++    }
++
+     if (!IsReg(id)) {
+         const Track& track = GetTrack(id);
+         if (variantIdx > track.variantCount) variantIdx = 0;
+diff --git a/PulsarEngine/SlotExpansion/CupsConfig.hpp b/PulsarEngine/SlotExpansion/CupsConfig.hpp
+index b5d6399..cbf0d4b 100644
+--- a/PulsarEngine/SlotExpansion/CupsConfig.hpp
++++ b/PulsarEngine/SlotExpansion/CupsConfig.hpp
+@@ -60,6 +60,26 @@ public:
+         return id < 0x2000 && IsValidCup(static_cast<PulsarCupId>(id / 4));
+     }
+ 
++    /*
++        How many tracks mainTracks actually holds. ToggleCTs zeroes ctsCupCount when the CTs
++        are switched off in the settings but leaves the array allocated, so the bound has to
++        come from definedCTsCupCount, which is the count the config was read with.
++    */
++    u32 GetLoadedTrackCount() const { return this->definedCTsCupCount * 4; }
++
++    /*
++        Whether this console owns the track behind id. Votes and winning tracks travel over
++        the network as raw ids, so a console running a pack with more tracks (or a different
++        Config.pul altogether) sends ids this pack has no Track for. Left unchecked they index
++        mainTracks out of bounds, and the garbage that comes back is used as variantCount (the
++        vote shows up with no name) and then as slot/musicSlot/crc32, which is what turns that
++        nameless vote into a crash for everyone once it wins.
++    */
++    bool IsTrackLoaded(PulsarId id) const {
++        if (IsReg(id)) return true;
++        return (static_cast<u32>(id) - PULSARID_FIRSTCT) < this->GetLoadedTrackCount();
++    }
++
+     //Slot Expansion
+     void SaveSelectedCourse(const PushButton& courseButton);
+     PulsarCupId GetNextCupId(PulsarCupId cupId, s32 direction) const;
+@@ -82,8 +102,12 @@ public:
+     static const u8 idToCourseId[32];
+ 
+     const Track& GetTrack(PulsarId id) const { //only for CTs
+-        return this->mainTracks[id - PULSARID_FIRSTCT];
++        const u32 idx = static_cast<u32>(id) - PULSARID_FIRSTCT;
++        if (idx >= this->GetLoadedTrackCount()) return CupsConfig::invalidTrack; //never read past the array
++        return this->mainTracks[idx];
+     }
++
++    static const Track invalidTrack; //returned for ids this pack does not have
+ public:
+ 
+ 
+diff --git a/PulsarEngine/SlotExpansion/UI/ExpansionUIMisc.cpp b/PulsarEngine/SlotExpansion/UI/ExpansionUIMisc.cpp
+index adcbb92..3331629 100644
+--- a/PulsarEngine/SlotExpansion/UI/ExpansionUIMisc.cpp
++++ b/PulsarEngine/SlotExpansion/UI/ExpansionUIMisc.cpp
+@@ -415,10 +415,31 @@ static u8 GetVotedVariantIdx(u32 playerId) {
+     return handler.receivedPackets[aid].voteVariantIdx[slot];
+ }
+ 
++static wchar_t s_unknownVoteNameBuffer[12][0x20];
++
++/*
++    A vote for a track this pack does not have has no BMG entry to name it, so it used to
++    render as an empty bar - indistinguishable from "has not voted yet", and it tells nobody
++    which track is at fault. Name it after its id instead: that id is exactly what has to be
++    looked up in the pack the vote came from.
++*/
++static bool SetUnknownVoteMessage(VoteControl& vote, PulsarId courseVote, u32 playerId) {
++    const CupsConfig* cupsConfig = CupsConfig::sInstance;
++    if (cupsConfig == nullptr || playerId >= 12) return false;
++    if (CupsConfig::IsReg(courseVote) || cupsConfig->IsTrackLoaded(courseVote)) return false;
++
++    swprintf(s_unknownVoteNameBuffer[playerId], 0x20, L"? %d ?", CupsConfig::ConvertTrack_PulsarIdToRealId(courseVote));
++    Text::Info info;
++    info.strings[0] = s_unknownVoteNameBuffer[playerId];
++    vote.SetMessage(BMG_TEXT, &info);
++    return true;
++}
++
+ static void CourseVoteBMG(VoteControl* vote, bool isCourseIdInvalid, PulsarId courseVote, MiiGroup& miiGroup, u32 playerId, bool isLocalPlayer, u32 team) {
+     u32 bmgId = courseVote;
+     if (bmgId != 0x1101 && bmgId < 0x2498) bmgId = GetTrackBMGIdForVariant(courseVote, GetVotedVariantIdx(playerId));
+     vote->Fill(isCourseIdInvalid, bmgId, miiGroup, playerId, isLocalPlayer, team);
++    if (SetUnknownVoteMessage(*vote, courseVote, playerId)) return;
+     SetVoteControlMessage(*vote, bmgId, courseVote, playerId);
+ }
+ kmCall(0x806441b8, CourseVoteBMG);
