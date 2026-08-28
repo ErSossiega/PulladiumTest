@@ -152,10 +152,31 @@ kmWrite32(0x808415ac, 0x388000ff);
 kmWrite32(0x80643004, 0x3be000ff);
 kmWrite32(0x808394e8, 0x388000ff);
 kmWrite32(0x80644104, 0x3b5b0000);
+static wchar_t s_unknownVoteNameBuffer[12][0x20];
+
+/*
+    A vote for a track this pack does not have has no BMG entry to name it, so it renders as
+    an empty bar - indistinguishable from "has not voted yet", and it tells nobody which track
+    is at fault. Name it after its id instead: that id is exactly what has to be looked up in
+    the pack the vote came from.
+*/
+static bool SetUnknownVoteMessage(VoteControl& vote, PulsarId courseVote, u32 playerId) {
+    const CupsConfig* cupsConfig = CupsConfig::sInstance;
+    if (cupsConfig == nullptr || playerId >= 12) return false;
+    if (CupsConfig::IsReg(courseVote) || cupsConfig->IsTrackLoaded(courseVote)) return false;
+
+    swprintf(s_unknownVoteNameBuffer[playerId], 0x20, L"? %d ?", CupsConfig::ConvertTrack_PulsarIdToRealId(courseVote));
+    Text::Info info;
+    info.strings[0] = s_unknownVoteNameBuffer[playerId];
+    vote.SetMessage(BMG_TEXT, &info);
+    return true;
+}
+
 static void CourseVoteBMG(VoteControl* vote, bool isCourseIdInvalid, PulsarId courseVote, MiiGroup& miiGroup, u32 playerId, bool isLocalPlayer, u32 team) {
     u32 bmgId = courseVote;
     if (bmgId != 0x1101 && bmgId < 0x2498) bmgId = GetTrackBMGId(courseVote, true);
     vote->Fill(isCourseIdInvalid, bmgId, miiGroup, playerId, isLocalPlayer, team);
+    SetUnknownVoteMessage(*vote, courseVote, playerId);
 }
 kmCall(0x806441b8, CourseVoteBMG);
 
