@@ -69,7 +69,9 @@ Ninety characters, and inside them: static members, `->` on pointers, indexing, 
 
 `a->b` **is** `(*a).b`. That `*` is the same `*` as in a textbook pointer exercise.
 
-**You don't touch `GameSource/`.** Those structs are the game's memory map, decided by Nintendo in 2008. `size_assert` exists to stop you.
+**You don't widen `GameSource/`.** Those structs are the game's memory map, decided by Nintendo in 2008. `size_assert` exists to stop you.
+
+*(Added later: "don't touch it" was the wrong way to put it. **Adding** a declaration for a function that already exists in the game and nobody had documented is fine — it's documentation, it changes nothing at runtime. What breaks the contract is changing the **layout**: new fields, bigger arrays. Which is exactly what I'd done.)*
 
 **Your own classes in `PulsarEngine/` are fair game.** Even when they inherit from a game class: your new fields land at the end, after the part the game knows about.
 
@@ -188,11 +190,13 @@ A method's `this` becomes the first explicit parameter. And the `else` branch th
 | Macro | What it writes | When |
 |---|---|---|
 | `kmCall` | `bl` — go *and come back* | hijack **one call** in the middle of the code |
-| `kmBranch` | `b` — go *and stay* | replace **an entire function** |
+| `kmBranch` | `b` — go *and stay* | replace **an entire function** \* |
 | `kmWrite16/32` | a raw value | change **a variable** or an instruction |
 | `RaceLoadHook`, `RaceFrameHook`, `BootHook`, `SectionLoadHook` | — | **no address at all**: a `void` function, one line to register it |
 
 > Before you go hunting for an address, check whether the moment you care about **already has a hook waiting for you**.
+
+*\* Added later, from a correction: `kmBranch` isn't only for replacing a whole function. `b` just means "go and don't come back", so putting one on a function's **`blr`** runs your code after the original has finished, keeping the original behaviour. Works; not necessarily good practice.*
 
 ### Working out an address
 
@@ -713,6 +717,8 @@ You turn it on in settings, interface section.
 1. **A breakpoint answers yes or no.** It fires → the function is being called. It doesn't → you're hooking the wrong place, and no amount of reasoning about the code would have told you.
 2. **Breakpoint on the `blr`, then read `r3`.** That's where PowerPC keeps return values. It works in reverse too: in a crash, an `r3` holding a number of *yours* says your code went through there.
 3. **Memory view** with emulation **stopped on a breakpoint**. The symbol will say `unk`: normal, there's no map loaded. You want the contents, not the name.
+
+*(Added later: I was doing all of this **without a symbol map**, which I didn't know was an option. With `RMCP01.map` loaded, Dolphin shows real demangled names across StaticR.rel and most of the orienting-by-hand above simply isn't needed. Dolphin's call tree also finds earlier call sites, and with the mkw decomp project you can use Ghidra to list every reference to a function.)*
 
 That's how I found out `GetMTMaxCharge` doesn't compute anything — it's a three-instruction getter on a variable at `0x808B5CC2`. And that the code that matters reads that variable **directly**, without going through the getter.
 

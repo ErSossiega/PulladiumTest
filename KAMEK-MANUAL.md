@@ -161,9 +161,19 @@ the next one starts, which is most of what you need to navigate a listing with n
 | Macro | What it writes | Use it to |
 |---|---|---|
 | `kmCall(addr, fn)` | `bl` — go **and come back** | hijack **one call** in the middle of a function |
-| `kmBranch(addr, fn)` | `b` — go **and stay** | replace **a whole function**, from its first instruction |
+| `kmBranch(addr, fn)` | `b` — go **and stay** | jump away and never come back — usually to replace a function from its first instruction |
 | `kmWrite16/32(addr, val)` | a raw value | change **a variable**, or a single instruction |
 | `kmWriteNop(addr)` | `60000000` | delete an instruction |
+
+### `kmBranch` isn't only for replacing a whole function
+
+`b` means "go and don't come back", and that's all it means. Put it on a function's first
+instruction and you replace the function — that's the common use. But put it on the function's
+**`blr`** and your own code runs *after* the original has done its work, keeping the original
+behaviour intact.
+
+Credit where it's due: I had this wrong until someone on the Pulsar server pointed it out. Their own
+caveat is worth keeping — it works, it isn't necessarily good practice.
 
 ### The ones that don't need an address at all
 
@@ -283,6 +293,8 @@ Walk it in order, it takes two minutes:
    old objects again.
 4. **Copied?** Does the folder your build copies into actually match the pack you're launching?
 5. **Reloaded?** Riivolution reads the files when the ISO starts. Not while it's running.
+6. **The right asset?** If your pack keeps per-language copies (`Language/<CODE>/Assets/`), the game
+   might be happily opening a different one from the one you edited.
 
 ### Check that your build actually stops on an error
 
@@ -331,8 +343,13 @@ reverse too, which is the useful part: in a crash dump, an `r3` holding a number
 *yours* means your code went through there.
 
 **To read memory**, use the Memory panel with emulation **stopped on a breakpoint**. With the game
-not running there's nothing there to look at. The symbol will say `unk` — that's normal, there's no
-map loaded, and you want the contents anyway, not the name.
+not running there's nothing there to look at.
+
+**Load a symbol map first.** Without one every symbol reads `unk` and you navigate by address alone.
+With `RMCP01.map` loaded, Dolphin shows real demangled names across StaticR.rel —
+`Kart::Movement::ActivateMushroom`, `Item::SlotData::DecideItem` — which turns most of the manual
+orienting described above into simply reading. Everything here about finding your bearings by hand
+is the fallback for when you don't have one.
 
 > One thing before you open the debugger at all: **try an absurd value.** Put a `1` where a `270`
 > should be. If nothing changes even then, your hook isn't firing, and that's a completely different
@@ -437,11 +454,28 @@ Same keyword, three unrelated jobs:
 For a class member, `static` goes **only in the declaration** in the `.hpp`. In the `.cpp` you define
 it qualified with the class name and **without** repeating `static`.
 
-### `GameSource/` is off limits
+### `GameSource/`: adding is fine, widening is another story
 
-Those structs are the game's memory map, decided by Nintendo in 2008. Add a field and `sizeof`
-changes, and `size_assert` will stop the build across dozens of files — which is **one error
-reported many times**, so read the first one and ignore the echo.
+Two different operations, worth not confusing.
+
+**Adding documentation** — declaring a function that already exists in the game but nobody had
+written down, fixing a name, noting an address you found in the debugger — changes nothing at
+runtime: you're only telling the compiler what lives at that address. Always allowed.
+
+And sometimes necessary. `GameSource/` is documentation written by hand (by melg), not an official
+artefact and not the same thing as the ongoing decompilation: **classes can be missing and names can
+simply be wrong.** People working on their own features have had to add whole groups of functions
+and correct a mis-named variable before their code would work. So if something you need isn't there,
+the answer may be that nobody has written it yet — not that you're looking in the wrong place.
+
+**Changing the layout** — a new field, a bigger array — changes `sizeof`, and `size_assert` will
+stop the build across dozens of files, which is **one error reported many times**: read the first
+one, ignore the echo.
+
+The assert isn't pedantry: the game's compiled code reaches those fields at **fixed offsets**. Widen
+the struct and the game carries on using the old ones, writing where you aren't looking. It can be
+done — item expansions exist — but from that moment every place the game touches that struct is
+yours to keep correct, and that's a lot of code, not a header edit.
 
 Your own classes under `PulsarEngine/` are a different story: extend those as much as you like, even
 when they inherit from a game class. Your new fields land **at the end**, after the part the game

@@ -61,16 +61,25 @@ spezzarlo in due: prima la metà alta, poi la metà bassa come offset.
 `lis` = *Load Immediate Shifted*: mette il valore nei 16 bit alti. Le istruzioni che seguono
 (`lha`, `lwz`, `lfs`, `stw`…) ci sommano il loro offset.
 
-### L'offset è con segno
+### Attenzione: l'offset è con segno
 
-Se comincia con **8, 9, A, B, C, D, E o F** è negativo e va **sottratto**:
+È un campo a **16 bit in complemento a due**, che detto semplice vuol dire che la metà alta del suo
+intervallo sono in realtà numeri negativi. Se il valore **grezzo** comincia con **8, 9, A, B, C, D,
+E o F**, sottraici `0x10000` e usa quello:
 
 ```
 lis  r3, 0x808C
-lwz  r3, -0x4000 (r3)   → 0x808C0000 − 0x4000 = 0x808BC000
+lwz  r3, 0xC000 (r3)    grezzo 0xC000 → comincia con C → 0xC000 − 0x10000 = −0x4000
+                        → 0x808C0000 − 0x4000 = 0x808BC000
 ```
 
-Sommarlo invece di sottrarlo sbaglia di 64 KB e ti manda in mezzo ai dati di qualcun altro.
+In pratica a mano lo farai di rado, perché Dolphin e quasi tutti i disassemblatori quel passaggio
+l'hanno già fatto per te e ti stampano l'offset **con il segno già applicato**, come `-0x4000`. La
+regola della prima cifra serve quindi quando leggi l'esadecimale grezzo dai byte: se nel listato c'è
+già il meno davanti, è tutto lì — sottrai e vai avanti.
+
+Sbagliare verso ti manda 64 KB più in là, in mezzo ai dati di qualcun altro. E sembrerà pure
+plausibile.
 
 ### In che binario sono
 
@@ -138,9 +147,18 @@ dopo.
 | Macro | Cosa scrive | Quando |
 |---|---|---|
 | `kmCall(addr, fn)` | `bl` — vai **e torna** | dirottare **una chiamata** in mezzo a una funzione |
-| `kmBranch(addr, fn)` | `b` — vai **e basta** | sostituire **una funzione intera**, dalla sua prima istruzione |
+| `kmBranch(addr, fn)` | `b` — vai **e basta** | saltare via e non tornare — di solito per sostituire una funzione dalla prima istruzione |
 | `kmWrite16/32(addr, val)` | un valore grezzo | cambiare **una variabile** o una singola istruzione |
 | `kmWriteNop(addr)` | `60000000` | cancellare un'istruzione |
+
+### `kmBranch` non serve solo a sostituire una funzione intera
+
+`b` vuol dire "vai e non tornare", e vuol dire solo quello. Messo sulla prima istruzione di una
+funzione la sostituisce — è l'uso comune. Ma messo sul **`blr`** della funzione, il tuo codice gira
+*dopo* che l'originale ha fatto il suo lavoro, tenendo intatto il comportamento originale.
+
+Merito di chi me l'ha fatto notare sul server di Pulsar. Vale la pena tenere anche la loro
+precisazione: funziona, non è detto sia buona pratica.
 
 ### Hook senza indirizzo
 
@@ -377,11 +395,29 @@ Le domande si fanno a chi ha una risposta — un campo, un getter. **Leggere è 
 Per un membro di classe, `static` si scrive **solo nella dichiarazione** (`.hpp`). Nel `.cpp` la
 definisci qualificata col nome della classe e **senza** ripetere `static`.
 
-### `GameSource/` non si tocca
+### `GameSource/`: aggiungere sì, allargare è un'altra storia
 
-Quelle struct sono la mappa della memoria del gioco. Aggiungerci un campo cambia `sizeof` e
-`size_assert` ferma la compilazione in decine di file — che sono **un errore solo, riportato molte
-volte**: leggi il primo, ignora l'eco.
+Sono due operazioni diverse, e vale la pena non confonderle.
+
+**Aggiungere documentazione** — dichiarare una funzione che nel gioco esiste già ma che nessuno
+aveva scritto, correggere un nome, annotare un indirizzo trovato col debugger — non cambia niente a
+runtime: dici solo al compilatore cosa c'è a quell'indirizzo. Sempre permesso.
+
+E a volte necessario. `GameSource/` è documentazione scritta a mano (da melg), non un artefatto
+ufficiale e non la stessa cosa della decompilazione in corso: **possono mancare classi intere e i
+nomi possono essere sbagliati.** C'è chi, per far funzionare la propria feature, ha dovuto aggiungere
+gruppi di funzioni e correggere il nome di una variabile. Quindi se quello che ti serve non c'è, la
+risposta può essere che nessuno l'ha ancora scritto — non che stai cercando nel posto sbagliato.
+
+**Cambiare il layout** — un campo nuovo, un array più grande — cambia `sizeof`, e `size_assert`
+ferma la compilazione in decine di file, che sono **un errore solo, riportato molte volte**: leggi
+il primo, ignora l'eco.
+
+L'assert non è pedanteria: il codice compilato del gioco raggiunge quei campi per **offset fissi**.
+Allarghi la struct, il gioco continua a usare gli offset vecchi, e da lì in poi scrive dove tu non
+guardi. Si può fare — l'item expansion esiste — ma da quel momento sei tu il responsabile di ogni
+punto in cui il gioco tocca quella struct, e sono tante righe di codice, non una modifica a un
+header.
 
 Le tue classi in `PulsarEngine/` invece puoi allungarle liberamente, anche quando ereditano da una
 classe del gioco: i campi nuovi finiscono **in coda**, dopo la parte che il gioco conosce.
