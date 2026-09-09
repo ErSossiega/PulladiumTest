@@ -111,6 +111,45 @@ Three bad properties at once:
 
 It's probably a few lines. It's the surroundings that are expensive.
 
+### 10. CPU bots in friend rooms, like MK8DX
+
+Fill a friend room up to 12 with bots when there aren't enough people.
+
+- **What's already there:** `PLAYER_CPU` exists in the engine (`Identifiers.hpp:247`),
+  `RacedataSettings` has `cpuMode` (`EASY`/`NORMAL`/`HARD`/`NONE`), and `randomSeed` (`0x30`) is
+  **already synced by the host** online. Propagating the setting is free too: `hostSystemContext`
+  carries it to the guests exactly the way mogi mode does
+- **Prior art to ask about first:** whether anyone in the scene has already tried, even
+  unsuccessfully. RR have had their hands in the payload for years. Same logic as every other week
+  saved by asking one question
+- **Difficulty: high.** The problem isn't spawning them, it's keeping them identical on every console
+
+**Why it's hard.** MKW online isn't lockstep: each console simulates locally and receives position
+and input updates that correct the *remote humans*. Nobody corrects a CPU. Any divergence — an
+unshared RNG source, a frame of drift, the order in which two items resolve — accumulates with
+nothing to straighten it out, and half a lap later every console is watching a different race.
+
+Two architectures:
+
+- **Local deterministic** — same seed everywhere, zero bandwidth. Looks elegant, is fragile: one
+  unsynced source of randomness and it drifts
+- **Host-authoritative** — the host simulates the bots and sends them as extra players, guests
+  interpolate them like remote humans. This is how MK8DX does it and it's the one that holds. The
+  price is bandwidth, on 2008 hardware where 12 players are already the limit. The channel exists:
+  `PacketExpansion` already hooks SELECT, ROOM, RH1 and RACEDATA
+
+**The constraint that shapes the design:** 12 slots in total. Bots occupy them, so the feature is
+"fill an empty room up to 12", not "add bots to a full one". Going past 12 means touching the game's
+own structures, which is a different project.
+
+**First step, an afternoon:** in a froom with two consoles, force `playerType = PLAYER_CPU` on a free
+slot and see whether they start at all without crashing. That answer alone says whether this is worth
+planning. If they do start: three laps with the local-deterministic version, then compare positions
+across the two consoles — that gives the real size of the problem instead of a theory.
+
+- **Shares the bad property of 9:** getting it wrong doesn't break my game, it breaks other people's
+  race — and they notice before I do
+
 ---
 
 ## Undecided
