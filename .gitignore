@@ -66,3 +66,4 @@ PulsarPackCreator/Executable/Pulsar Pack Creator.dll.config
 # Python
 __pycache__/
 *.pyc
+RECAP.md

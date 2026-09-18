@@ -10,4 +10,4 @@ kmBranch(0x8057efe0, umt100);*/
 
 //kmWrite16(0x8057efe0,1); this crash the game when doing a mt
 //kmWrite16(80591208,1); this crash the game instantly at boot. and i'm dumb cuz i forgot the 0x at the start.
-kmWrite16(0x808B5CC2,1); //with this the mt will charge in 1 single frame.
+kmWrite16(0x808B5CC2,270); //with this the mt will charge in 1 single frame.

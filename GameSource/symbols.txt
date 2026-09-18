@@ -730,6 +730,7 @@ UpdatePoints__16RacedataScenarioFv = 0x8052e950
 ComputeGPRank__14RacedataPlayerFv = 0x8052daf0
 __dt__14RacedataPlayerFv = 0x8052DC68
 __vt__14RacedataPlayer = 0x808b3294
+__vt__6Random = 0x808b42e0
 
 
 ##RACEINFO
@@ -1772,6 +1773,7 @@ GetRaceinfoRandom__9DriverMgrFv = 0x807bd718
 sInstance__9DriverMgr = 0x809c23f8
 isOnlineRace__9DriverMgr = 0x809c38b9
 isTT__9DriverMgr = 0x809c38bc
+isVSRace__9DriverMgr = 0x809c38ba
 
 
 ##OBJECTS

@@ -818,6 +818,384 @@ diventa impossibile, anche premendo `L` per rilinkare.
 
 ---
 
+## Giorno 5 — il randomizzatore degli oggetti
+
+Due settimane di pausa in mezzo. Riprendere è costato più di quanto pensassi, e non per la
+sintassi: quello che si era perso era l'abitudine a **far girare il codice nella testa**. La prima
+mezz'ora non ricordavo nemmeno cosa fosse un'inizializzazione, e gli array me li sono dovuti
+riprendere da zero.
+
+### Cosa è stato costruito
+
+`PulsarEngine/Race/ItemRandomizer.cpp`. Prendi un oggetto, l'icona dice la verità, premi il tasto,
+e succede altro. La discrepanza voluta fra **icona** ed **effetto**.
+
+Stato a fine giornata: il meccanismo di copia e riscrittura della tabella **funziona**, lo
+scorrimento fisso funziona, il sorteggio funziona. Manca il mescolamento vero, e l'ultima versione
+crasha per un indice fuori dall'array. Non è finito, ma ogni pezzo è stato verificato da solo prima
+di costruirci sopra il successivo.
+
+### Il pezzo che regge tutto
+
+`GameSource/MarioKartWii/Item/ItemBehaviour.hpp:25`
+
+```cpp
+static Behavior behaviourTable[19];   //809c36a0, index item id
+```
+
+Diciannove righe, una per `ItemId`, e in ogni riga `objId`, `numberOfItems`, `useType` e un
+puntatore a funzione. Quando premi il tasto, il gioco va nella riga dell'oggetto che hai e chiama
+quello che ci trova scritto. Non c'è nessuno `switch` gigante: la strada è una, e passa di lì.
+
+È un **membro statico con un simbolo in `symbols.txt`**, quindi si raggiunge scrivendo
+`Item::Behavior::behaviourTable[i]`. Nessun indirizzo scritto a mano: includi l'header e il linker
+fa il resto. E `0x809c36a0` sta sopra `809BD6E8`, cioè in zona dati: è una variabile, si può
+scrivere.
+
+### Leggere un puntatore a funzione
+
+```cpp
+void (*useFunction)(Player& player);   //0x18, null = l'oggetto è trascinabile
+```
+
+Si legge partendo dal nome e andando verso l'esterno. `useFunction` è avvolto da `(* … )`, quindi è
+un puntatore. Subito dopo c'è una lista di parametri, quindi è un puntatore **a funzione**. Il
+`void` iniziale è quello che quella funzione restituisce.
+
+Le parentesi attorno alla stella non sono decorative: `void *useFunction(Player&)` sarebbe una
+funzione che restituisce un puntatore, cosa completamente diversa.
+
+Due conseguenze pratiche, sbagliate entrambe prima di capirle:
+
+- il **nome di una funzione è già il suo indirizzo**, quindi si assegna senza parentesi. Con le
+  parentesi la chiami adesso, che è l'opposto di quello che vuoi: è la differenza fra dare a
+  qualcuno il tuo numero e chiamarlo mentre glielo dai;
+- non è un caso che la firma sia `(Player&)`. Le funzioni già presenti nella tabella sono i metodi
+  `Use...` di `Item::Player`. Un metodo riceve l'oggetto come primo argomento nascosto, quindi
+  `void Player::UseBullet()` e `void f(Player&)`, a livello di macchina, sono la stessa forma.
+
+### Il valore assurdo: tutte e 19 le righe alla stessa funzione
+
+Primo test, prima di qualunque permutazione: puntare la `useFunction` di **tutte** le righe a una
+funzione mia che chiama `player.UseBullet()`.
+
+In gara, qualunque cosa uscisse dalla cassa dava il bullet. Tre risposte in una gara sola: la
+tabella è viva, è scrivibile a `RaceLoadHook`, e nessuno la sovrascrive dopo di me.
+
+**Perché non filtrare le righe da riempire:** metà tabella ha `useFunction` nulla — banane e gusci,
+quelli che si trascinano. Se avessi scritto solo dove era già pieno e poi in gara mi fosse uscita
+una banana senza effetti, non avrei saputo distinguere "quella riga l'ho saltata" da "il codice non
+funziona". Riempiendo tutto, il risultato atteso è netto e la risposta è una sola.
+
+### La scoperta vera: `useFunction` non è tutto
+
+Con la tabella riempita, gli oggetti lanciabili facevano **due cose insieme**: la banana partiva
+lanciata *e* partiva il bullet.
+
+Quindi il lancio non passa da `useFunction`. Se ci passasse, avendola io sovrascritta, la banana
+non sarebbe più partita. Il lancio passa da un'altra strada, scelta in base a `useType` — nelle note
+avevo già trovato `PrepareHandlers[5]` e `UpdateHandlers[5]`, cinque come i cinque valori di
+`useType`. E l'oggetto lanciato era quello **giusto**, quindi quella strada legge `objId` dalla
+stessa riga.
+
+> Il comportamento di un oggetto non sta in un campo solo: sta in `useType`, `objId` e
+> `useFunction` insieme. Toccarne uno e lasciare gli altri dà due comportamenti sovrapposti.
+
+È la ragione per cui la versione buona sposta **righe intere da 0x1c byte**, non puntatori. E la
+buona notizia che ne viene: siccome `objId` viaggia con la riga, quando prendi il bullet e dentro
+c'è la riga della banana, esce una banana vera, col suo modello e il suo comportamento.
+
+### La copia di sicurezza, e il test il cui risultato atteso è "niente"
+
+Per mescolare serve un originale intatto. Se scrivi nella tabella mentre la leggi distruggi i dati
+man mano, e alla gara dopo lavoreresti su una tabella già mescolata: dopo tre gare, poltiglia.
+
+Quindi un array mio di 19 righe, riempito **una volta sola** alla prima gara, con un `bool` che si
+ricorda che è fatto. Poi, a ogni gara, un secondo ciclo che riscrive la tabella leggendo dalla copia.
+
+Il passo intermedio è quello che mi ha dato più fiducia di tutti: il secondo ciclo che copia la riga
+`i` nella riga `i`, cioè **che non cambia niente**. Se il meccanismo funziona, il gioco deve
+comportarsi esattamente come al solito. Se invece esplode, il problema è nel copiare, e lo scopri
+prima di averci costruito sopra il resto.
+
+Il log lo ha confermato meglio della gara: diciannove righe di copia alla prima gara, **zero alla
+seconda**, e diciannove righe di riscrittura in entrambe. Il `bool` faceva il suo mestiere.
+
+### Lo scorrimento fisso, prima del caso
+
+Prima di mettere in mezzo l'RNG, uno scorrimento di uno: la riga `i` prende la riga `i + 1`, e
+l'ultima riprende la prima con `(i + 1) % 19`.
+
+Deterministico, quindi le previsioni si scrivono prima di avviare: guscio verde → guscio rosso,
+banana → fake item box, fungo → triplo fungo, tripla banana → guscio verde. In gara è tornato tutto.
+
+Sull'indice: `i + 1` da solo, all'ultimo giro, leggerebbe la casella 19 di un array che arriva alla
+18. Il resto della divisione serve a chiudere il cerchio.
+
+### Il seme
+
+`Random` non è casuale: è una sequenza calcolata che parte da un numero, il seme. **Stesso seme,
+stessa sequenza, sempre.** Se il seme non cambia, ogni gara ha la stessa mappa.
+
+Serve un numero che cambi da solo, e la console ne ha uno pronto: `OS::GetTick()`, il contatore che
+sale da quando hai acceso.
+
+`XPF.cpp` fa lo stesso ma gli gira attorno i bit, scambiando metà alta e metà bassa, perché i bit
+bassi del contatore corrono velocissimi e quelli alti quasi non si muovono. Offline il tick liscio
+basta. Online no, e non per eleganza: se il seme non è identico su tutti i client, ognuno gioca una
+partita diversa. Per questo XPF, nelle stanze private, il seme se lo fa dare dalla stanza invece
+che dall'orologio.
+
+### Pescare con reimmissione non è mescolare
+
+Con `NextLimited(19)` chiamato diciannove volte il codice girava, e in gara sembrava tutto a posto.
+Il log diceva un'altra cosa. Prima gara, numeri estratti:
+
+```
+16, 0, 9, 6, 11, 12, 15, 13, 8, 14, 15, 5, 5, 17, 9, 15, 11, 17, 2
+```
+
+Il 15 tre volte. Il 5, il 9, l'11 e il 17 due volte. E mai usciti: 1, 3, 4, 7, 10, 18.
+
+Tradotto in gara: **sei comportamenti su diciannove non esistevano in quella partita**, e tre oggetti
+diversi facevano la stessa identica cosa. Non è ripetizione fra una gara e l'altra, è la mappa di
+*quella* gara a essere storta.
+
+Il motivo è che ogni chiamata non sa niente delle precedenti. È distribuire carte rimettendo ogni
+volta la carta nel mazzo: qualcuno riceve tre assi e sei carte non escono mai. La soluzione non è
+pescare meglio, è **cambiare gesto**: mescolare il mazzo e poi distribuire in ordine, così ogni riga
+va a esattamente una posizione e tutte vengono usate.
+
+E c'è il motivo per cui giocando non si vedeva: in una gara raccogli una manciata di oggetti, non
+diciannove, quindi è facile che la coppia doppia non ti capiti tutta e due le volte sotto mano.
+
+> Quando un effetto è troppo raro o troppo sparso per vederlo giocando, si smette di giocare e si
+> stampa.
+
+### Il crash, e il posto dove **non** è la colpa
+
+Ultima versione della giornata. Un bot prende una cassa e:
+
+```
+Error: DSI
+SRR0: 0x80797500  Item::ObjHolder::GetTotalItemCount
+LR:   0x807BB7D4  Item::SlotData::DecideItem
+R03:  0xA544F4D4
+```
+
+La catena delle chiamate: `Itembox::OnCollision` → `Player::DecideItem` →
+`PlayerRoulette::DecideItem` → `SlotData::DecideItem` → `GetTotalItemCount`, e lì un indirizzo che
+non è un indirizzo.
+
+La colpa era mia, in questa riga:
+
+```cpp
+randomItemArray[i + random.NextLimited(19-1)]
+```
+
+`i` arriva a 18, la pescata arriva a 17, la somma arriva a 35, e l'array ha 19 caselle. Per buona
+parte dei giri stavo **leggendo memoria che non mi appartiene** e scrivendo quella spazzatura nella
+tabella del gioco come se fosse una riga di comportamento. Quella riga finta contiene un `objId` che
+non è un oggetto; il gioco lo usa per cercare il contenitore corrispondente e si ritrova in mano
+`0xA544F4D4`.
+
+> **Il luogo del crash non è il luogo della colpa.** Nel dump non compare una sola riga di codice
+> mio. Io ho lasciato la mina al caricamento della gara, a calpestarla è stato il gioco minuti dopo.
+> Gli errori di memoria si trovano solo risalendo la catena delle chiamate e poi chiedendosi chi ha
+> scritto dati sbagliati là dentro.
+
+### Gli errori del giorno 5
+
+**L'inizializzazione fuori da tutte le funzioni.**
+
+```cpp
+bool isVSRace = DriverMgr::isVSRace;   // a livello di namespace
+```
+
+La parte a destra dell'uguale viene letta **una volta sola**, quando quella variabile nasce, cioè
+all'avvio del gioco. In quel momento non c'è nessuna gara, quindi il valore è falso e resta falso
+per sempre. L'`if` non era mai vero e il log non usciva mai: il log funzionava, non veniva mai
+raggiunto.
+
+La stessa riga **dentro** la funzione dell'hook viene eseguita a ogni caricamento gara e legge il
+valore vero. Stessa riga, due posti, due comportamenti.
+
+Su Kamek c'è un motivo in più per non fidarsi: gli inizializzatori dinamici a livello di namespace
+potrebbero non essere eseguiti affatto. Le globali si dichiarano; non si inizializzano con valori
+presi dal gioco. Con una costante, tipo `static bool isRandom = false;`, invece va benissimo: quel
+valore finisce scritto nel binario e non c'è niente da eseguire.
+
+**Le due funzioni confuse per una.** Il lavoro è fatto di due funzioni con mestieri opposti, e per
+mezz'ora ho provato a scriverle come se fossero la stessa:
+
+| | quando gira | cosa fa | firma |
+|---|---|---|---|
+| `randomItem` | al caricamento gara, una volta | riscrive la tabella | `void()` |
+| `randomAHMoment` | in gara, quando premi il tasto | l'effetto nuovo | `void(Item::Player&)` |
+
+L'indice e la tabella servono nella prima. Quando parte la seconda, la ricerca nella tabella
+**l'ha già fatta il gioco**, altrimenti non sarebbe finito lì dentro. Dentro la seconda non c'è
+niente da cercare, c'è solo da fare.
+
+**`getBehaviorIndex()`.** Non esiste. Se l'è inventato l'autocomplete dell'editor. Cercato in tutto
+`GameSource`: zero occorrenze, con qualsiasi maiuscola.
+
+> Se un nome non lo trovi cercandolo dentro `GameSource`, quel nome non esiste, per quanto
+> ragionevole sembri. Gli header sono documentazione scritta a mano da più persone, e i nomi non
+> seguono nessuna convenzione prevedibile.
+
+**`Item::Player::UseBullet();`**
+
+```
+a nonstatic member reference must be relative to a specific object
+```
+
+`::` raggiunge qualcosa che esiste in copia unica: uno statico, un namespace. `.` raggiunge qualcosa
+che appartiene a un oggetto preciso, e quindi un oggetto lo devi avere. Il bullet non esiste in
+astratto: esiste quello **di un giocatore**, che consuma il suo oggetto e muove il suo kart. Quel
+giocatore ce l'avevo già in mano, era il parametro.
+
+**`Random random();`** — non crea un oggetto. Per il compilatore dichiara una **funzione** che si
+chiama `random`, non prende parametri e restituisce un `Random`. Quando non passi argomenti,
+l'oggetto si crea senza parentesi. È lo stesso scherzo delle parentesi del puntatore a funzione, in
+un'altra veste.
+
+**`Item::Behavior& behavior;`** — una referenza è un soprannome, e va inizializzata nel momento in
+cui nasce. Non si crea vuota e si riempie dopo come un `bool`.
+
+Il rovescio è peggio, perché è silenzioso: **dimenticare la `&`**.
+
+```cpp
+Item::Behavior behavior = Item::Behavior::behaviourTable[i];   // copia!
+```
+
+Compila, nessun warning, il gioco parte, e in gara non succede niente: hai modificato una copia che
+muore alla fine del giro di ciclo. Legale e silenzioso, di nuovo.
+
+**Le quadre vogliono dire due cose diverse.**
+
+```cpp
+Item::Behavior copia[19];   // DICHIARAZIONE: creami 19 caselle
+copia[3]                    // USO: dammi la casella numero 3
+```
+
+Nella dichiarazione il numero è *quante*, nell'uso è *quale*. Ecco perché `[19]` è giusto in una e
+fuori dall'array nell'altra. Questa confusione mi ha fatto scrivere `behaviourTable[19]` come indice
+più di una volta.
+
+**L'`if` dentro il `for` invece che attorno.** La copia di sicurezza va fatta una volta sola, e avevo
+messo il controllo dentro il ciclo:
+
+- giro con `i` a 0: il bool è falso, copio la riga 0, metto il bool a vero
+- giro con `i` a 1: il bool adesso è vero, salto
+- giri da 2 a 18: salto, salto, salto
+
+Una riga copiata e diciotto caselle vuote. Il `for` è la ripetizione; la domanda "l'ho già fatto?"
+si fa una volta, prima, quindi sta fuori. Prima si decide se fare il lavoro, poi si fa tutto il
+lavoro, poi ci si segna che è stato fatto.
+
+Il trucco che ha trovato il bug costa dieci secondi: **recitare il primo giro, il secondo e
+l'ultimo.** Gli errori sui cicli non sono quasi mai errori di scrittura — il codice è giusto come
+frase e sbagliato come storia, e la storia si sente meglio a voce che a schermo.
+
+**Il seme non inizializzato.**
+
+```cpp
+s32 seed;              // dichiarato e mai assegnato
+Random random(seed);   // ...e passato così
+```
+
+Il seme era quello che capitava di trovare in quella zona di stack. È **esattamente** il bug che
+avevo trovato in un file altrui mezz'ora prima, rifatto nel mio.
+
+**Il log che stampava l'oggetto invece del numero.** Passavo `random` al posto del numero pescato, e
+uscivano diciannove righe con lo stesso valore, `-2143711312`, che è un indirizzo di stack e che
+cambiava fra una gara e l'altra.
+
+La correzione non è cosmetica: **il numero pescato va messo in una variabile.** `NextLimited` non è
+una domanda, è un'azione: ogni chiamata fa avanzare la sequenza. Chiamandola una volta dentro le
+quadre e una nel log, il log racconterebbe un numero diverso da quello davvero usato.
+
+E in C non esistono le stringhe da sommare col `+`: si scrivono segnaposto nel testo e si passano i
+valori dopo, in ordine — `%d` decimale, `%x` esadecimale, `%s` testo. Il numero di segnaposto deve
+corrispondere ai valori passati: due `%d` e un valore solo, e il secondo se lo pesca dalla memoria a
+caso.
+
+**Due log con lo stesso testo.** Quando ne usciva uno non sapevo quale dei due fosse. Vanno scritti
+diversi, e ne va messo uno **prima** dell'`if`, non dentro: così distingui "la funzione non è mai
+partita" da "è partita ma la condizione era falsa". Sono due bug diversi e si cercano in due posti
+diversi.
+
+**Due cicli annidati invece di due cicli in fila.** Mescolare e distribuire sono lavori separati, e
+infilandoli uno dentro l'altro facevo 361 scambi invece di 19, con la scrittura nella tabella in
+mezzo al mescolamento. La forma giusta sono due `for` uno sotto l'altro.
+
+E un classico dentro il classico: `for (int j = 0; j < 19; i++)`, che fa avanzare `i` invece di `j`.
+Il compilatore non dice niente, perché è una frase legale.
+
+### Due simboli mancanti, stessa procedura
+
+`isVSRace` e `__vt__6Random` non erano in `symbols.txt`. Il commento nell'header dà l'indirizzo, ma
+**il commento non è il linker**: se il simbolo non è nella lista, il link fallisce.
+
+```
+isVSRace__9DriverMgr = 0x809c38ba
+__vt__6Random        = 0x808b42e0
+```
+
+Il secondo è la vtable. `Random` ha un distruttore virtuale, quindi ogni oggetto si porta dietro un
+puntatore alla tabella delle funzioni virtuali, e chi ce lo scrive è il costruttore: creare un
+`Random` significa fare riferimento a quell'indirizzo.
+
+Il gesto ormai è meccanico: **l'errore dà il nome, l'header dà l'indirizzo, la lista li unisce.**
+
+### Un bug trovato in casa d'altri
+
+`PulsarEngine/Extensions/LECODE/XPF.cpp`, la funzione che decide lo scenario casuale:
+
+```cpp
+s32 seed;                          // riga 29
+if(stanza privata) {
+    ...
+    u32 seed;                      // riga 33 — stesso nome
+    ...
+    seed = ...;                    // scrive in QUESTA
+}
+else {
+    seed = ...tick...;             // scrive in quella di fuori
+}
+Random random(seed);               // legge quella di fuori
+```
+
+Due variabili con lo stesso nome: quella interna **copre** l'esterna per tutta la durata del blocco.
+È l'ombra, *shadowing*. Nel ramo delle stanze private si scrive nella variabile interna, che muore
+alla parentesi chiusa, e il costruttore legge quella esterna, mai assegnata.
+
+Quindi nelle stanze private quel seme è spazzatura, e il risultato è proprio quello che la funzione
+vuole evitare. Da segnalare a chi mantiene Pulsar, insieme alla patch del build script.
+
+### Cosa manca al randomizzatore
+
+**Il mescolamento vero**, cioè scambiare le righe a due a due invece di pescare, e con il sacchetto
+che si restringe: il compagno di scambio si sorteggia solo fra le posizioni non ancora sistemate,
+`i + NextLimited(19 - i)`. È quello che impedisce ai doppioni di nascere.
+
+Lo scambio vuole una variabile d'appoggio: `a = b` seguito da `b = a` non scambia niente, perché il
+primo assegnamento ha già cancellato `a` e restano due copie di `b`.
+
+E l'ultimo passo, che non è pulizia ma parte del lavoro: **togliere il log.** Un log che stampa la
+mappa rende inutile la feature, perché chi apre la console sa in anticipo cosa fa ogni oggetto. Al
+suo posto ci va un commento, o fra due mesi lo rimetto per debuggare altro e non me ne accorgo.
+
+### Cosa mi porto dietro dalla pausa
+
+Che a tornare non si perde la sintassi, si perde il **metodo**. Le cose che mi hanno sbloccato oggi
+non erano nozioni di C++: erano recitare i giri del ciclo a voce, stampare invece di giocare,
+tenere separati due lavori in due cicli, e fare il test neutro il cui risultato atteso è che non
+cambi niente.
+
+---
+
 ## Cosa resta aperto
 
 - Due gare di fila, per verificare che `RaceLoadHook` azzeri davvero anche col *riprova*

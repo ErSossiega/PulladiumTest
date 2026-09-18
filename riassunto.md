@@ -543,3 +543,4 @@ Rispondi prima di guardare sotto.
 |---|---|
 | `MANUALE-KAMEK.md` / `KAMEK-MANUAL.md` | il riferimento da consultare mentre lavori |
 | `DIARIO.md` / `Four-Days-Inside-Pulsar.md` | come ci sei arrivato, con tutti gli errori |
+| `NOTE-ITEM-RANDOMIZER.md` | la ricerca sugli item random, con gli indirizzi |

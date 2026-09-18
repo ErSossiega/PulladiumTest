@@ -4,17 +4,11 @@ What's left to do, in the order it makes sense to do it.
 Every entry says **what I need to know first** and **what makes it hard**, so when I pick it back up
 I don't have to rebuild the context.
 
-Status: none started. Research done where noted.
+Status: 1 and 4 done (item randomizer, as a setting). Research done where noted.
 
 ---
 
 ## Now
-
-### 1. Item randomizer — first version
-
-- **Research:** done, notes kept locally
-- **Needs:** nothing I don't already have
-- **Difficulty:** low. No debugger, testable alone, the effect shows on the first lap
 
 ### 2. Control remapping
 
@@ -32,20 +26,48 @@ Status: none started. Research done where noted.
 
 ### 3. Full randomizer — character, vehicle, drift, track
 
-Extend the randomizer beyond items.
+**Research done, and it's easier than expected.** In `UI/Section/SectionParams.hpp` it's all sitting
+together in the same struct:
 
-- **Research:** done, notes kept locally. Easier than I expected
-- **Difficulty:** medium, but not for the reason it looks. The writing is easy — **the problem is
+```cpp
+CourseId    vsTracks[32];   //0x78   offline
+CharacterId characters[4];  //0x12c
+KartId      karts[4];       //0x13c
+u32         driftType[4];   //0x164
+void RandomizeVSTracks();   //805e32ec   <- the game already has this
+```
+
+Three of the four things are **adjacent arrays of 4**, and for tracks there's already a
+randomisation function in the game. No pointer tables, no dispatch: it's a matter of writing values
+before the race starts.
+
+Ranges: `CharacterId` 0x00–0x2F (48 entries, Miis and bikers included), `KartId` 0x00–0x23 (36).
+
+- **Difficulty:** medium, but not for the reason it looks. Writing is easy — **the problem is
   *when***: after the selection screens, before loading. Finding that moment is the real work
+- **To check:** that Miis and bikers (`PEACH_BIKER` 0x2D…) don't break anything when drawn at random,
+  and that the character+vehicle combination is always valid (weight classes have constraints in MKW)
 - **Note:** offline. Online is a different thing, see below
 
-### 4. Item randomizer as a setting
+### 4. Item randomizer online — same map for everyone
 
-A **setting** first, not a mode. I've already walked this road with the mushroom/star/mega in TT on
-day 3: redoing it takes an afternoon and gives me the playable thing.
+The randomizer works offline and as a setting. Online, every console seeds with its own
+`OS::GetTick()`, so every player gets a different map. Everyone would be playing a different game.
 
-- **Depends on:** 1
-- **Difficulty:** low, it's repeating something already done
+- **Model already in the repo:** `PulsarEngine/Extensions/LECODE/XPF.cpp`, around line 30. The host
+  uses its own `selectId`, clients read it from the host's `RACEHEADER1` packet, the tick is only the
+  offline fallback. Same problem, already solved
+- **Needs first:** `randomItemArray` has to restart from `copyItemArray` at every race, before the
+  Fisher-Yates. Today it's filled once and reshuffled on top of itself. Offline that's invisible,
+  but with a shared seed it means two players get different maps depending on how many races they
+  played before joining
+- **Then, last:** remove the `OS::Report` logs. Not before: comparing the log of two consoles is
+  the only way to check the maps match. After: a log left in means anyone can read the map
+- **Difficulty:** medium. Few lines, but like 9 it can't be tested alone: it needs two clients
+- **Open question:** TT stays vanilla even though the snapshot is taken at every race load. The
+  likely reason is that the game rebuilds `behaviourTable` itself before the hook runs
+  (`Item::InitAllBehavior`). Worth confirming with a breakpoint, because if it's true the `else`
+  branch that restores the table is doing nothing
 
 ### 5. Upstream the build-script fix to Pulladium
 
@@ -89,7 +111,7 @@ already **broken** rather than **to be built**.
 
 ### 8. The randomizer as its own mode
 
-Promote 4 to a real mode only **if, playing it as a setting, it turns out to deserve one.**
+Promote the setting to a real mode only **if, playing it as a setting, it turns out to deserve one.**
 
 - **Prior art in-house:** `PulsarEngine/Gamemodes/KO` and `OnlineTT`
 - **Difficulty:** high. Menus, system contexts (`PULSAR_MODE_KO` as the model), probably networking
@@ -129,5 +151,7 @@ It's probably a few lines. It's the surroundings that are expensive.
 - Diary of the first four days (`Four-Days-Inside-Pulsar.md`)
 - Kamek manual (`KAMEK-MANUAL.md`)
 - Recap (`RECAP.md`)
-- Item randomizer research (kept locally)
+- Item randomizer research (`NOTES-ITEM-RANDOMIZER.md`)
+- Item randomizer, variant A: Fisher-Yates on `behaviourTable` at race load, VS only
+- Item randomizer as a setting, with vanilla restored outside VS or when switched off
 - To publish: the thread about the diary — text ready, just needs pasting

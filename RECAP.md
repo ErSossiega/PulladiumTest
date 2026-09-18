@@ -499,4 +499,5 @@ answers. If it never fires, you have your answer.)*
 |---|---|
 | `KAMEK-MANUAL.md` | the reference to consult while working |
 | `Four-Days-Inside-Pulsar.md` | how I got here, with every mistake |
+| `NOTES-ITEM-RANDOMIZER.md` | the item randomizer research, with addresses |
 | `TODO.md` | what's next, and in what order |

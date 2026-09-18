@@ -11,8 +11,8 @@
 namespace Pulsar{
     namespace Race{
         void MyMushroom(Kart::Movement& Movement){
-        //bool isTT = DriverMgr::isTT; made before trying with the settings
-        if (Settings::Mgr::Get().GetSettingValue(Settings::SETTINGSTYPE_TT, SETTINGTT_RADIO_ITEM) == TTSETTING_ITEM_DISABLED){
+        bool isTT = DriverMgr::isTT; //made before trying with the settings
+        if (Settings::Mgr::Get().GetSettingValue(Settings::SETTINGSTYPE_TT, SETTINGTT_RADIO_ITEM) == TTSETTING_ITEM_DISABLED && isTT==true){
                 Movement.ActivateBullet(0xFF);
             }else
             {

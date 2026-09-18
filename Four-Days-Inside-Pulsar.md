@@ -726,6 +726,264 @@ That's how I found out `GetMTMaxCharge` doesn't compute anything — it's a thre
 
 ---
 
+## Day 5 — the item randomizer
+
+Two weeks off in between. Coming back cost more than I expected, and not because of syntax: what I'd lost was the habit of **running the code in my head**. For the first half hour I couldn't remember what an initialisation was, and I had to pick arrays up from scratch.
+
+### What I built
+
+`PulsarEngine/Race/ItemRandomizer.cpp`. You pick up an item, the icon tells the truth, you press the button, and something else happens. A deliberate mismatch between **icon** and **effect**.
+
+State at the end of the day: the copy-and-rewrite machinery **works**, the fixed shift works, the random draw works. The real shuffle is missing, and the last version crashes on an out-of-bounds index. Not finished, but every piece was verified on its own before the next one was built on top of it.
+
+### The piece everything rests on
+
+`GameSource/MarioKartWii/Item/ItemBehaviour.hpp:25`
+
+```cpp
+static Behavior behaviourTable[19];   //809c36a0, index item id
+```
+
+Nineteen rows, one per `ItemId`, and inside each row `objId`, `numberOfItems`, `useType` and a function pointer. When you press the button, the game goes to the row of the item you're holding and calls whatever is written there. There's no giant `switch`: there's one road, and it goes through here.
+
+It's a **static member with a symbol in `symbols.txt`**, so you reach it by writing `Item::Behavior::behaviourTable[i]`. No hand-written addresses: include the header and the linker does the rest. And `0x809c36a0` sits above `809BD6E8`, i.e. in the data range: it's a variable, you can write to it.
+
+### Reading a function pointer
+
+```cpp
+void (*useFunction)(Player& player);   //0x18, null means the item is draggable
+```
+
+You read it starting from the name and working outwards. `useFunction` is wrapped in `(* … )`, so it's a pointer. Immediately after comes a parameter list, so it's a pointer **to a function**. The leading `void` is what that function returns.
+
+The parentheses around the star aren't decoration: `void *useFunction(Player&)` would be a function returning a pointer, which is a completely different thing.
+
+Two practical consequences, both of which I got wrong before I understood them:
+
+- **a function's name is already its address**, so you assign it without parentheses. With parentheses you call it right now, which is the opposite of what you want: it's the difference between giving someone your phone number and dialling it while you hand it over;
+- the signature being `(Player&)` is no accident. The functions already in the table are `Item::Player`'s `Use...` methods. A method receives its object as a hidden first argument, so `void Player::UseBullet()` and `void f(Player&)` are, at machine level, the same shape.
+
+### The absurd value: all 19 rows pointed at one function
+
+First test, before any permutation: point **every** row's `useFunction` at a function of mine that calls `player.UseBullet()`.
+
+In a race, whatever came out of the box gave me the bullet. Three answers from one race: the table is live, it's writable at `RaceLoadHook`, and nobody overwrites it after me.
+
+**Why not filter which rows to fill:** half the table has a null `useFunction` — bananas and shells, the ones you drag behind you. If I'd only written where it was already filled, and then a banana came out with no effect, I couldn't have told "I skipped that row" from "my code doesn't work". Filling everything makes the expected result unambiguous.
+
+### The real discovery: `useFunction` isn't the whole story
+
+With the table filled, throwable items did **two things at once**: the banana got thrown *and* the bullet fired.
+
+So the throw doesn't go through `useFunction`. If it did, having overwritten it, the banana wouldn't have come out at all. The throw goes down another road, chosen by `useType` — my notes already had `PrepareHandlers[5]` and `UpdateHandlers[5]`, five of them, like the five values of `useType`. And the thrown object was the **right** one, so that road reads `objId` from the same row.
+
+> An item's behaviour doesn't live in one field. It lives in `useType`, `objId` and `useFunction` together. Touch one and leave the others and you get two behaviours stacked on top of each other.
+
+That's why the good version moves **whole 0x1c-byte rows**, not pointers. And the good news that follows: since `objId` travels with the row, when you pick up a bullet and the banana's row is inside it, what comes out is a real banana, with its own model and its own behaviour.
+
+### The backup, and the test whose expected result is "nothing"
+
+To shuffle you need an intact original. If you write into the table while reading it you destroy the data as you go, and next race you'd be working on an already-shuffled table: after three races, mush.
+
+So: an array of my own, 19 rows, filled **once** on the first race, with a `bool` that remembers it's done. Then, every race, a second loop that rewrites the table reading from the copy.
+
+The intermediate step is the one that gave me the most confidence of all: the second loop copying row `i` into row `i`, i.e. **changing nothing**. If the machinery works, the game has to behave exactly as usual. If instead it blows up, the problem is in the copying, and you find that out before building anything else on top.
+
+The log confirmed it better than the race did: nineteen copy lines on the first race, **zero on the second**, and nineteen rewrite lines on both. The `bool` was doing its job.
+
+### The fixed shift, before the randomness
+
+Before bringing the RNG in, a shift of one: row `i` takes row `i + 1`, and the last one wraps back to the first with `(i + 1) % 19`.
+
+Deterministic, so the predictions get written down before launching: green shell → red shell, banana → fake item box, mushroom → triple mushroom, triple banana → green shell. In the race they all came out right.
+
+On the index: `i + 1` on its own would, on the last iteration, read slot 19 of an array that stops at 18. The remainder is what closes the circle.
+
+### The seed
+
+`Random` isn't random: it's a computed sequence starting from one number, the seed. **Same seed, same sequence, always.** If the seed doesn't change, every race gets the same map.
+
+You need a number that changes by itself, and the console has one ready: `OS::GetTick()`, the counter that climbs from power-on.
+
+`XPF.cpp` does the same but shuffles the bits around, swapping the top and bottom halves, because the counter's low bits race and the high bits barely move. Offline the plain tick is enough. Online it isn't, and not for elegance: if the seed isn't identical on every client, everyone plays a different game. That's why XPF, in private rooms, takes the seed from the room instead of the clock.
+
+### Drawing with replacement isn't shuffling
+
+With `NextLimited(19)` called nineteen times the code ran, and in a race it looked fine. The log said otherwise. First race, the numbers drawn:
+
+```
+16, 0, 9, 6, 11, 12, 15, 13, 8, 14, 15, 5, 5, 17, 9, 15, 11, 17, 2
+```
+
+15 three times. 5, 9, 11 and 17 twice each. And never drawn at all: 1, 3, 4, 7, 10, 18.
+
+Translated into the race: **six behaviours out of nineteen didn't exist in that game**, and three different items did exactly the same thing. This isn't repetition between races, it's *that* race's map being lopsided.
+
+The reason is that each call knows nothing about the previous ones. It's dealing cards and putting each card back in the deck every time: somebody gets three aces and six cards never come out. The fix isn't to draw better, it's to **change the gesture**: shuffle the deck and then deal in order, so each row goes to exactly one position and all of them get used.
+
+And there's the reason it wasn't visible while playing: in one race you pick up a handful of items, not nineteen, so it's easy for both halves of a duplicated pair never to land in your hands.
+
+> When an effect is too rare or too scattered to see by playing, stop playing and start printing.
+
+### The crash, and the place where the fault **isn't**
+
+Last version of the day. A bot hits an item box and:
+
+```
+Error: DSI
+SRR0: 0x80797500  Item::ObjHolder::GetTotalItemCount
+LR:   0x807BB7D4  Item::SlotData::DecideItem
+R03:  0xA544F4D4
+```
+
+The call chain: `Itembox::OnCollision` → `Player::DecideItem` → `PlayerRoulette::DecideItem` → `SlotData::DecideItem` → `GetTotalItemCount`, and there an address that isn't an address.
+
+The fault was mine, on this line:
+
+```cpp
+randomItemArray[i + random.NextLimited(19-1)]
+```
+
+`i` goes up to 18, the draw goes up to 17, the sum reaches 35, and the array has 19 slots. For a good share of the iterations I was **reading memory that isn't mine** and writing that garbage into the game's table as if it were a behaviour row. That fake row contains an `objId` that isn't an object; the game uses it to look up the matching holder and ends up holding `0xA544F4D4`.
+
+> **The crash site is not the fault site.** Not one line of my code appears in that dump. I left the mine at race load; the game stepped on it minutes later. Memory bugs are only found by walking back up the call chain and then asking who wrote bad data in there.
+
+### Day 5 mistakes
+
+**The initialisation outside every function.**
+
+```cpp
+bool isVSRace = DriverMgr::isVSRace;   // at namespace scope
+```
+
+The right-hand side is read **once**, when that variable is born, i.e. when the game boots. At that moment there's no race, so the value is false and stays false forever. The `if` was never true and the log never came out: the log worked fine, it was simply never reached.
+
+The same line **inside** the hook's function runs on every race load and reads the real value. Same line, two places, two behaviours.
+
+On Kamek there's one more reason not to trust it: dynamic initialisers at namespace scope may not run at all. Globals get declared; they don't get initialised with values taken from the game. With a constant, like `static bool isRandom = false;`, it's fine: that value ends up baked into the binary and there's nothing to execute.
+
+**Two functions mistaken for one.** The job is made of two functions with opposite trades, and for half an hour I kept trying to write them as if they were the same one:
+
+| | when it runs | what it does | signature |
+|---|---|---|---|
+| `randomItem` | at race load, once | rewrites the table | `void()` |
+| `randomAHMoment` | in the race, on button press | the new effect | `void(Item::Player&)` |
+
+The index and the table belong in the first. By the time the second runs, **the game has already done the table lookup** — otherwise it wouldn't have ended up in there. Inside the second there's nothing to look up, there's only something to do.
+
+**`getBehaviorIndex()`.** Doesn't exist. The editor's autocomplete invented it. Searched across all of `GameSource`: zero hits, in any capitalisation.
+
+> If you can't find a name by searching `GameSource`, that name doesn't exist, however reasonable it looks. The headers are documentation written by hand by several people, and the names follow no predictable convention.
+
+**`Item::Player::UseBullet();`**
+
+```
+a nonstatic member reference must be relative to a specific object
+```
+
+`::` reaches something that exists in a single copy: a static, a namespace. `.` reaches something belonging to a specific object, and so you need to have an object. A bullet doesn't exist in the abstract: what exists is **a player's** bullet, which consumes their item and moves their kart. I already had that player in my hands — it was the parameter.
+
+**`Random random();`** — doesn't create an object. To the compiler that declares a **function** called `random` taking nothing and returning a `Random`. When you pass no arguments, an object is created without parentheses. It's the same parentheses joke as the function pointer, wearing a different coat.
+
+**`Item::Behavior& behavior;`** — a reference is a nickname, and it must be initialised the moment it's born. You can't create it empty and fill it later like a `bool`.
+
+The opposite slip is worse, because it's silent: **forgetting the `&`**.
+
+```cpp
+Item::Behavior behavior = Item::Behavior::behaviourTable[i];   // a copy!
+```
+
+Compiles, no warning, the game boots, and in the race nothing happens: you modified a copy that dies at the end of the iteration. Legal and silent, again.
+
+**Square brackets mean two different things.**
+
+```cpp
+Item::Behavior copy[19];   // DECLARATION: make me 19 slots
+copy[3]                    // USE: give me slot number 3
+```
+
+In a declaration the number is *how many*, in a use it's *which one*. That's why `[19]` is right in one and off the end of the array in the other. This confusion had me writing `behaviourTable[19]` as an index more than once.
+
+**The `if` inside the `for` instead of around it.** The backup has to happen once, and I'd put the check inside the loop:
+
+- iteration with `i` at 0: the bool is false, copy row 0, set the bool to true
+- iteration with `i` at 1: the bool is now true, skip
+- iterations 2 to 18: skip, skip, skip
+
+One row copied and eighteen empty slots. The `for` is the repetition; the question "have I done this already?" is asked once, up front, so it belongs outside. First decide whether to do the work, then do all of the work, then record that it's done.
+
+The trick that found the bug costs ten seconds: **recite the first iteration, the second, and the last.** Loop bugs are almost never writing errors — the code is right as a sentence and wrong as a story, and a story is easier to hear out loud than to see on screen.
+
+**The uninitialised seed.**
+
+```cpp
+s32 seed;              // declared and never assigned
+Random random(seed);   // ...and passed like that
+```
+
+The seed was whatever happened to be lying in that bit of stack. It is **exactly** the bug I'd found in someone else's file half an hour earlier, reproduced in mine.
+
+**The log printing the object instead of the number.** I was passing `random` in place of the drawn number, and out came nineteen lines with the same value, `-2143711312`, which is a stack address, and which changed between races.
+
+The fix isn't cosmetic: **the drawn number has to go in a variable.** `NextLimited` isn't a question, it's an action: every call advances the sequence. Calling it once inside the brackets and once in the log would make the log report a different number from the one actually used.
+
+And in C there are no strings to add with `+`: you write placeholders in the text and pass the values after, in order — `%d` decimal, `%x` hex, `%s` text. The number of placeholders has to match the values passed: two `%d` and one value, and the second one gets picked out of random memory.
+
+**Two logs with the same text.** When one came out I couldn't tell which of the two it was. They have to read differently, and one belongs **before** the `if`, not inside it: that separates "the function never ran" from "it ran but the condition was false". Two different bugs, found in two different places.
+
+**Two nested loops instead of two loops in a row.** Shuffling and dealing are separate jobs, and by nesting them I was doing 361 swaps instead of 19, with the write into the table sitting in the middle of the shuffle. The right shape is two `for` loops one under the other.
+
+And a classic inside the classic: `for (int j = 0; j < 19; i++)`, which advances `i` instead of `j`. The compiler says nothing, because it's a legal sentence.
+
+### Two missing symbols, same procedure
+
+`isVSRace` and `__vt__6Random` weren't in `symbols.txt`. The header comment gives you the address, but **a comment is not the linker**: if the symbol isn't in the list, the link fails.
+
+```
+isVSRace__9DriverMgr = 0x809c38ba
+__vt__6Random        = 0x808b42e0
+```
+
+The second one is the vtable. `Random` has a virtual destructor, so every object carries a pointer to the virtual function table, and the constructor is what writes it in: creating a `Random` means referring to that address.
+
+The move is mechanical by now: **the error gives you the name, the header gives you the address, the list joins them.**
+
+### A bug found in someone else's house
+
+`PulsarEngine/Extensions/LECODE/XPF.cpp`, the function that picks the random scenario:
+
+```cpp
+s32 seed;                          // line 29
+if(private room) {
+    ...
+    u32 seed;                      // line 33 — same name
+    ...
+    seed = ...;                    // writes into THIS one
+}
+else {
+    seed = ...tick...;             // writes into the outer one
+}
+Random random(seed);               // reads the outer one
+```
+
+Two variables with the same name: the inner one **shadows** the outer one for the whole block. In the private-room branch the write goes into the inner variable, which dies at the closing brace, and the constructor reads the outer one, never assigned.
+
+So in private rooms that seed is garbage, which is precisely what the function is trying to avoid. One to report to whoever maintains Pulsar, along with the build script patch.
+
+### What the randomizer still needs
+
+**The real shuffle**, i.e. swapping rows pairwise instead of drawing, with the bag shrinking as you go: the swap partner is drawn only from the positions not yet settled, `i + NextLimited(19 - i)`. That's what stops duplicates from being born in the first place.
+
+A swap needs a holding variable: `a = b` followed by `b = a` swaps nothing, because the first assignment has already destroyed `a` and you're left with two copies of `b`.
+
+And the last step, which is part of the work rather than tidying up: **remove the log.** A log that prints the map makes the whole feature pointless, because anyone who opens the console knows in advance what each item does. A comment goes in its place, or in two months I'll put it back to debug something else and never notice.
+
+### What I took away from the break
+
+That coming back doesn't cost you the syntax, it costs you the **method**. The things that unblocked me today weren't C++ facts: they were reciting loop iterations out loud, printing instead of playing, keeping two jobs in two separate loops, and running the neutral test whose expected result is that nothing changes.
+
+---
+
 ## What's still open
 
 - Testing the mushroom→bullet hook **in a race**: it links, but I haven't watched it fire yet
